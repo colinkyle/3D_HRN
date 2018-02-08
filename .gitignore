@@ -1,0 +1,15 @@
+!.gitignore
+!*/code
+\.idea/
+
+Papers/
+
+Simulated/
+
+Train_nonbrain/
+
+data/
+
+model_saves/
+
+trainData/
