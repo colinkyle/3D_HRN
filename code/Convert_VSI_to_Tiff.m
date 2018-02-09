@@ -1,8 +1,8 @@
 clc
 clear
 %% Set path, variables etc...
-vsi_dir = '/Volumes/Seagate 4TB/MMU 35717/MMU35717  B1S2 321N - 341N/';
-save_dir = '/Volumes/Seagate 4TB/MMU 35717/MMU35717  B1S2 321N - 341N/';
+vsi_dir = 'G:\VSI_DATA\MMU 35481';
+save_dir = 'G:\VSI_DATA\MMU 35481';
 %mkdir(save_dir);
 javaaddpath('~/SYNC/MyFunctions/bfmatlab')
  
@@ -13,10 +13,10 @@ imname = file('*.vsi');
 for iSlide = 1:numel(imname)
     cd(vsi_dir)
     
-%      loadVSI(imname{iSlide},'show');
-%      stop
+%     loadVSI(imname{iSlide},'show');
+%     stop
     try
-        info = infoVSI(imname{iSlide},17);
+        info = infoVSI(imname{iSlide},15);
     catch
         continue
     end
@@ -34,9 +34,9 @@ for iSlide = 1:numel(imname)
     end
     clearvars I1 I2 I3 I
     parfor iPlane = 1:3
-        I1 = loadVSI_java(imname{iSlide},17,iPlane,x,y(1),xspan,yspan(1));
-        I2 = loadVSI_java(imname{iSlide},17,iPlane,x,y(2),xspan,yspan(2));
-        I3 = loadVSI_java(imname{iSlide},17,iPlane,x,y(3),xspan,yspan(3));
+        I1 = loadVSI_java(imname{iSlide},15,iPlane,x,y(1),xspan,yspan(1));
+        I2 = loadVSI_java(imname{iSlide},15,iPlane,x,y(2),xspan,yspan(2));
+        I3 = loadVSI_java(imname{iSlide},15,iPlane,x,y(3),xspan,yspan(3));
         I(:,:,iPlane) = cat(1,I1,I2,I3);
     end
     %I = imresize(I,.5);
