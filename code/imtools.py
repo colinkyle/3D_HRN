@@ -10,15 +10,17 @@ import pickle
 import pymc3 as pm
 from pymc3.distributions.dist_math import alltrue_elemwise
 #import pymp
-from scipy.interpolate import interpn
+import SimpleITK as sitk
+from scipy.interpolate import interpn, RegularGridInterpolator
 from scipy import stats
-from TF_models import AtlasNet
+from TF_models import AtlasNet, ElasticNet
 import theano
 from theano.ifelse import ifelse
 from theano import tensor as T
 import tifffile
 import fsys
-
+import tensorflow as tf
+import tqdm
 # debug
 from theano.compile.nanguardmode import NanGuardMode
 
@@ -94,10 +96,10 @@ class Img(np.ndarray):
   @classmethod
   def from_array(cls, imgdat, metadata={}):
     return cls(
-        shape=imgdat.shape,
-        buffer=imgdat.astype(np.float32),
-        dtype=np.float32,
-        metadata=metadata)
+      shape=imgdat.shape,
+      buffer=imgdat.astype(np.float32),
+      dtype=np.float32,
+      metadata=metadata)
 
   def imwrite(self, fpath):
     metadata = json.dumps(self.meta)
@@ -105,9 +107,9 @@ class Img(np.ndarray):
 
   def view(self):
     plt.imshow(np.ndarray(
-        shape=self.shape,
-        buffer=self.astype(np.float32),
-        dtype=np.float32), cmap='gray', interpolation='bicubic')
+      shape=self.shape,
+      buffer=self.astype(np.float32),
+      dtype=np.float32), cmap='gray', interpolation='bicubic')
     plt.xticks([]), plt.yticks([])  # to hide tick values on X and Y axis
     plt.show()
 
@@ -117,19 +119,19 @@ class Img(np.ndarray):
 
   def compose_rotation_3D(self,theta_xyz):
     affine_x = np.array([[1, 0, 0, 0], ...
-                        [0, math.cos(math.radians(theta_xyz[0])), -1.*math.sin(math.radians(theta_xyz[0])), 0], ...
-                        [0, math.sin(math.radians(theta_xyz[0])), math.cos(math.radians(theta_xyz[0])), 0], ...
-                        [0, 0, 0, 1]])
+    [0, math.cos(math.radians(theta_xyz[0])), -1.*math.sin(math.radians(theta_xyz[0])), 0], ...
+                         [0, math.sin(math.radians(theta_xyz[0])), math.cos(math.radians(theta_xyz[0])), 0], ...
+                         [0, 0, 0, 1]])
 
     affine_y = np.array([[math.cos(math.radians(theta_xyz[1])), 0, math.sin(math.radians(theta_xyz[1])), 0], ...
-                        [0, 1, 0, 0], ...
-                        [-1.*math.sin(math.radians(theta_xyz[1])), 0, math.cos(math.radians(theta_xyz[1])), 0], ...
-                        [0, 0, 0, 1]])
+    [0, 1, 0, 0], ...
+                         [-1.*math.sin(math.radians(theta_xyz[1])), 0, math.cos(math.radians(theta_xyz[1])), 0], ...
+                         [0, 0, 0, 1]])
 
     affine_z = np.array([[math.cos(math.radians(theta_xyz[2])), -1.*math.sin(math.radians(theta_xyz[2])), 0, 0], ...
-                        [math.sin(math.radians(theta_xyz[2])), math.cos(math.radians(theta_xyz[2])), 0, 0], ...
-                        [0, 0, 1, 0], ...
-                        [0, 0, 0, 1]])
+    [math.sin(math.radians(theta_xyz[2])), math.cos(math.radians(theta_xyz[2])), 0, 0], ...
+                         [0, 0, 1, 0], ...
+                         [0, 0, 0, 1]])
 
     affine = np.dot(np.dot(affine_x,affine_y),affine_z)
     return np.dot(np.array(self.meta['MAT']), affine)
@@ -137,8 +139,8 @@ class Img(np.ndarray):
   def compose_rigid_2D(self,xytheta):
     #affine_og = self.get_affine_2D()
     affine = np.array([[math.cos(math.radians(xytheta[2])), math.sin(math.radians(xytheta[2])), xytheta[0]],
-                        [-1.0*math.sin(math.radians(xytheta[2])), math.cos(math.radians(xytheta[2])), xytheta[1]],
-                        [0, 0, 1]])
+                       [-1.0*math.sin(math.radians(xytheta[2])), math.cos(math.radians(xytheta[2])), xytheta[1]],
+                       [0, 0, 1]])
 
     return affine #np.dot(affine_og, np.dot(affine_rot, affine_trans))
 
@@ -247,9 +249,9 @@ class Edge:
     new_img[0:sz2[0], 0:sz2[1], 2] = img2
 
     plt.imshow(np.ndarray(
-        shape=big_size,
-        buffer=new_img.astype(np.float32),
-        dtype=np.float32), cmap='gray', interpolation='bicubic')
+      shape=big_size,
+      buffer=new_img.astype(np.float32),
+      dtype=np.float32), cmap='gray', interpolation='bicubic')
     plt.xticks([]), plt.yticks([])  # to hide tick values on X and Y axis
     plt.show()
 
@@ -333,11 +335,41 @@ class Img3D:
     #self.edges[edgeID].view(img2 = node1_transformed)
     return (cc,warp_matrix)
 
+  def score_param_consistency(self,xytheta):
+    half_width = self.images[0].shape[1]/2.
+    half_height = self.images[0].shape[0]/2.
+    total_err = 0
+    for pair in self.edges.keys():
+      # convert center rotated to origin rotated
+      warp1 = affine2d_from_xytheta(xytheta[pair[0]])  # img1 warp
+      warp2 = affine2d_from_xytheta(xytheta[pair[1]])  # img2 warp
+
+      # calculate img1 -> img0
+      warp3 = np.dot(np.linalg.inv(warp1), warp2)
+      _, _, mri_tz, mri_x, mri_y, _ = affine_get_params(affine_2d_to_3d(warp3))
+
+      # calculations to convert to center rotated
+      xy1, _ = reverse_tform_order(half_width, half_height, mri_tz)
+      mri_x_prime = mri_x + (half_width) - xy1[0]
+      mri_y_prime = mri_y + (half_height) - xy1[1]
+
+      # get probabilities from edge distributions
+      p_x = self.edges[pair].p_x(mri_x_prime)
+      p_y = self.edges[pair].p_y(mri_y_prime)
+      p_theta = self.edges[pair].p_theta(mri_tz)
+      # cost function
+      p_edge = p_x * p_y * p_theta * (1 - .05 ** np.diff(pair))
+
+      if not np.isnan(p_edge):
+        total_err += np.log(p_edge)
+    return np.exp(total_err / len(self.edges.keys()))
+
 class MRI:
 
   def __init__(self,fname):
-    self.info = nib.load('mri_small.nii')
-    self.data = self.info.get_data()
+
+    self.affine = nib.load(fname).affine
+    self.data = nib.load(fname).get_data()
     self.data = self.data/max(self.data.flatten())
 
   @lazy_property
@@ -360,83 +392,21 @@ class MRI:
     warpCoef = []
     warpList = []
     # per section
-    with pymp.Parallel(4) as p:
-      for i,img in enumerate(IMG.images):
-        # x,y,z MRI
-        x_mri = np.array([self.info.affine[0][0] * x + self.info.affine[0][3] for x in range(self.data.shape[0])])
-        y_mri = np.array([self.info.affine[1][1] * y + self.info.affine[1][3] for y in range(self.data.shape[1])])
-        z_mri = np.array([self.info.affine[2][2] * z + self.info.affine[2][3] for z in range(self.data.shape[2])])
-
-        # scale and position of histology
-        x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
-        y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
-        z = img.meta['MAT'][2][3] + dz
-        XX, YY = np.atleast_2d(x, y)
-        YY = YY.T
-
-        # calculate rotation matrices
-        affine_x = np.array([[1, 0, 0, 0],
-                             [0, math.cos(math.radians(theta_x)), -1. * math.sin(math.radians(theta_x)), 0],
-                             [0, math.sin(math.radians(theta_x)), math.cos(math.radians(theta_x)), 0],
-                             [0, 0, 0, 1]])
-
-        affine_y = np.array([[math.cos(math.radians(theta_y)), 0, math.sin(math.radians(theta_y)), 0],
-                             [0, 1, 0, 0],
-                             [-1. * math.sin(math.radians(theta_y)), 0, math.cos(math.radians(theta_y)), 0],
-                             [0, 0, 0, 1]])
-        MAT = np.dot(affine_x, affine_y)
-
-        # transform sample points
-        XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
-        YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
-        ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
-
-        #interpolate results
-        mri = interpn((x_mri, y_mri, z_mri), self.p_intensity, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0)
-        (cc, warp) = rigid_reg(mri.astype(np.float32),img.p_intensity)
-        warpList.append(warp)
-        warpCoef.append(cc)
-        dy, dx, dtheta = warp[0][2], warp[1][2], np.arcsin(warp[0][1]) * 180 / np.pi
-        print('max: ', dx, dy, dtheta, 'cc: ', cc)
-
-    return (warpList, warpCoef)
-
-  def reg_to_slice_TF(self,IMG,dz=0,theta_x=0,theta_y=0):
-    params = {'load_file': '/Users/colin/Dropbox/__Atlas__/model_saves/model-regNET_257x265_21000',
-              'save_file': 'regNET3',
-              'save_interval': 1000,
-              'batch_size': 32,
-              'lr': .0001,  # Learning rate
-              'rms_decay': 0.9,  # RMS Prop decay
-              'rms_eps': 1e-8,  # RMS Prop epsilon
-              'width': 265,
-              'height': 257,
-              'numParam': 3,
-              'train': True}
-
-    # go to training dir
-    fsys.cd('/Users/colin/Dropbox/__Atlas__')
-
-    ## initialize net
-    net = AtlasNet(params)
-    #test code remove
-    #ideal = np.random.uniform(low=-10, high=10, size=(params['batch_size'], params['numParam']))
-
-    ## create pairs of histology and sliced MRI
-    batch = np.zeros(shape=(len(IMG.images), IMG.images[0].shape[1], IMG.images[0].shape[0], 2))
-    # per section
+    #with pymp.Parallel(4) as p:
     for i,img in enumerate(IMG.images):
       # x,y,z MRI
-      x_mri = np.array([self.info.affine[0][0] * x + self.info.affine[0][3] for x in range(self.data.shape[0])])
-      y_mri = np.array([self.info.affine[1][1] * y + self.info.affine[1][3] for y in range(self.data.shape[1])])
-      z_mri = np.array([self.info.affine[2][2] * z + self.info.affine[2][3] for z in range(self.data.shape[2])])
+      x_mri = np.array([self.affine[0][0] * x + self.affine[0][3] for x in range(self.data.shape[0])])
+      y_mri = np.array([self.affine[1][1] * y + self.affine[1][3] for y in range(self.data.shape[1])])
+      z_mri = np.array([self.affine[2][2] * z + self.affine[2][3] for z in range(self.data.shape[2])])
 
+      # scale and position of histology
       x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
       y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
       z = img.meta['MAT'][2][3] + dz
       XX, YY = np.atleast_2d(x, y)
       YY = YY.T
 
+      # calculate rotation matrices
       affine_x = np.array([[1, 0, 0, 0],
                            [0, math.cos(math.radians(theta_x)), -1. * math.sin(math.radians(theta_x)), 0],
                            [0, math.sin(math.radians(theta_x)), math.cos(math.radians(theta_x)), 0],
@@ -447,62 +417,300 @@ class MRI:
                            [-1. * math.sin(math.radians(theta_y)), 0, math.cos(math.radians(theta_y)), 0],
                            [0, 0, 0, 1]])
       MAT = np.dot(affine_x, affine_y)
+
+      # transform sample points
       XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
       YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
       ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
-      mri = Img.from_array(interpn((x_mri, y_mri, z_mri), self.p_intensity, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0))
-      batch[i, :, :, :] = cv2.merge((np.rot90(mri.p_intensity), np.rot90(img.p_intensity)))
 
+      #interpolate results
+      mri = interpn((x_mri, y_mri, z_mri), self.p_intensity, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0)
+      (cc, warp) = rigid_reg(mri.astype(np.float32),img.p_intensity)
+      warpList.append(warp)
+      warpCoef.append(cc)
+      dy, dx, dtheta = warp[0][2], warp[1][2], np.arcsin(warp[0][1]) * 180 / np.pi
+      print('max: ', dx, dy, dtheta, 'cc: ', cc)
+
+    return (warpList, warpCoef)
+
+  # def reg_to_slice_TF(self,net,IMG,dz=0,theta_x=0,theta_y=0):
+  #
+  #   tformed, xytheta, cost_cc = net.run_batch(batch)
+  #   # for i in range(tformed.shape[0]):
+  #   #   plt.figure()
+  #   #   merged = np.dstack(
+  #   #     (np.array(batch[i, :, :, 0]), 0.*np.array(batch[i, :, :, 1]), np.array(tformed[i][:][:][:]).squeeze()))
+  #   #   plt.imshow(merged)
+  #   #   plt.show()
+  #
+  #   #test code
+  #   #out = net.run_batch(batch)
+  #
+  #   # avgCost = 100 * [np.inf]
+  #   # for i in range(10000):
+  #   #   cnt, cost, out = net.train(batch[np.random.randint(batch.shape[0], size=10),:,:,:])
+  #   #   avgCost.append(cost)
+  #   #   avgCost.pop(0)
+  #   #   print('count: {}, cost: {}, avg_cost: {}, sanity: {}'.format(cnt, cost, np.mean(avgCost),
+  #   #         np.mean(np.abs(out),axis=0)))
+  #   #   if (params['save_file']):
+  #   #     if cnt % params['save_interval'] == 0:
+  #   #       net.save_ckpt('model_saves/model-' + params['save_file'] + "_" + str(params['width']) + 'x' + str(
+  #   #         params['height']) + '_' + str(cnt))
+  #   #       print('Model saved')
+  #   #
+  #   # # test code
+  #   # out = net.run_batch(batch)
+  #   #net.sess.close()
+  #   #net.sess.reset(tf.DIRECT_SESSION)
+  #
+  #   del net
+  #
+  #   return (tformed, xytheta, cost_cc)
+
+  def retrain_TF(self,net,big_batch,ntrain=500,nbatch=10):
+    print('\nretraining model...')
+    ## estimate transformations
+    for _ in tqdm.tqdm(range(ntrain)):
+      batch = big_batch[np.random.choice(range(big_batch.shape[0]),nbatch),:,:,:]
+      cnt, cost, out, cost_t = net.train(batch, np.zeros((nbatch,3)))
+
+      #print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
+    return net
+
+  def retrain_TF_E(self, net, big_batch, ntrain=500, nbatch=10):
+    print('\nretraining model...')
+    ## estimate transformations
+    for _ in tqdm.tqdm(range(ntrain)):
+      batch = big_batch[np.random.choice(range(big_batch.shape[0]), nbatch), :, :, :]
+      cnt, cost, cost_cc, E_det_j, E_div, E_curl = net.train(batch)
+
+      # print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
+    return net
+    #helper functions
+
+  def retrain_TF_Both(self, netR, netE, big_batch, ntrain=500, nbatch=10):
+    print('\nretraining model...')
+    ## estimate transformations
+    for _ in tqdm.tqdm(range(ntrain)):
+      batch = big_batch[np.random.choice(range(big_batch.shape[0]), nbatch), :, :, :]
+      cnt, cost, out, cost_t, tformed = netR.train(batch,np.zeros((nbatch,3)))
+      for i in range(nbatch):
+        batch[i,:,:,1] = np.squeeze(tformed[i,:,:])
+      cnt, cost, cost_cc, E_det_j, E_div, E_curl = netE.train(batch)
+
+        # print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
+    return netR, netE
+    #helper functions
+
+  def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res):
+    # variables
+    nspacing = 5
+    nbatch = nspacing**5
+    n_each_param = 1
+    ntrain = 5000
+    ## load net
+    print('loading models...')
+    # go to training dir
+    fsys.cd('D:/Dropbox/__Atlas__')
+    params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
+              'save_file': 'regNETshallow',
+              'save_interval': 1000,
+              'batch_size': 32,
+              'lr': .0001,  # Learning rate
+              'rms_decay': 0.9,  # RMS Prop decay
+              'rms_eps': 1e-8,  # RMS Prop epsilon
+              'width': 265,
+              'height': 257,
+              'numParam': 3,
+              'train': True}
+    netR = AtlasNet(params)
+    params['load_file'] = 'D:/__Atlas__/model_saves/model-Elastic2_257x265_1000'
+    params['save_file'] = 'Elastic2'
+    netE = ElasticNet(params)
+
+    max_score = 0
+    max_param = [0, 0, 0]
+    #loop parameter resolution
+    for _ in range(4):
+      ## gen training batch
+      print('\ngenerating training batch...')
+
+      z_vals = []#np.random.randint(zlim[0],zlim[1],nbatch)
+      theta_x_vals = []
+      theta_y_vals = []
+      dxy_vals = []
+      dz_vals = []
+      zs = np.linspace(zlim[0],zlim[1], nspacing)
+      txs = np.linspace(theta_xlim[0], theta_xlim[1], nspacing)
+      tys = np.linspace(theta_ylim[0], theta_ylim[1], nspacing)
+      dxys = np.linspace(xy_res[0], xy_res[1], nspacing)
+      dzs = np.linspace(z_res[0], z_res[1], nspacing)
+
+      for z in zs:
+        for tx in txs:
+          for ty in tys:
+            for dxy in dxys:
+              for dz in dzs:
+                z_vals.append(z)
+                theta_x_vals.append(tx)
+                theta_y_vals.append(ty)
+                dxy_vals.append(dxy)
+                dz_vals.append(dz)
+
+
+      big_batch = np.zeros(shape=(n_each_param*nbatch,params['width'],params['height'],2),dtype=np.float32)
+
+      pos = (0,n_each_param)
+      for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
+        big_batch[pos[0]:pos[1],:,:,:] = self.gen_batch(IMG,z,tx,ty,dxy,dz,subsample=True,n_subsample=n_each_param)#[np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
+        pos = (pos[0]+n_each_param,pos[1]+n_each_param)
+      ## retrain network
       # plt.figure()
       # merged = np.dstack(
-      #   (np.array(batch[i, :, :, 0]), np.array(batch[i, :, :, 1]), np.array(batch[i, :, :, 1])))
+      #   (np.array(big_batch[0, :, :, 0]), np.array(big_batch[0, :, :, 1]), np.array(big_batch[0, :, :, 1])))
       # plt.imshow(merged)
       # plt.show()
+      # exit()
 
-      #(cc, warp) = rigid_reg(mri.astype(np.float32),img.p_intensity)
-      #warpList.append(warp)
-      #warpCoef.append(cc)
-      #dy, dx, dtheta = warp[0][2], warp[1][2], np.arcsin(warp[0][1]) * 180 / np.pi
-      #print('max: ', dx, dy, dtheta, 'cc: ', cc)
+      # retrain elastic after every rigid? or something?
+      netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain,nbatch=32)
 
-    ## estimate transformations
-    tformed, xytheta = net.run_batch(batch)
-    for i in range(tformed.shape[0]):
+      ## compute fits
+      print('\ncomputing parameter scores...')
+      score = np.zeros(shape=(nbatch,))
+      pos = 0
+      for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
+        batch = self.gen_batch(IMG,z,tx,ty,dxy,dz)
+        #batch = self.gen_batch(IMG,z,tx,ty)
+        tformed, xytheta, _ = netR.run_batch(batch)
+        for i in range(tformed.shape[0]):
+          batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
+        tformed, theta, cost_cc, pix_vals, dxy = netE.run_batch(batch)
+
+        p_consistency = IMG.score_param_consistency(xytheta)
+        score[pos] = .6*np.mean(cost_cc) + .4*p_consistency
+        pos+=1
+
+      ## update parameter ranges
       plt.figure()
-      merged = np.dstack(
-        (np.array(batch[i, :, :, 0]), np.array(batch[i, :, :, 1]), np.array(tformed[i][:][:][:]).squeeze()))
-      plt.imshow(merged)
+      n,bins,_ = plt.hist(score)
       plt.show()
+      max_id = np.argmax(score)
+      print('\nmax score:',np.max(score), 'pos:',z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id])
 
-    #test code
-    #out = net.run_batch(batch)
+      if np.max(score)> max_score:
+        max_score = np.max(score)
+        max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id]]
+        #update z
+        z_span = np.asscalar(np.diff(zlim))/4.
+        zlim = [z_vals[max_id] - z_span, z_vals[max_id] + z_span]
+        # update theta x
+        tx_span = np.asscalar(np.diff(theta_xlim)) / 4.
+        theta_xlim = [theta_x_vals[max_id] - tx_span, theta_x_vals[max_id] + tx_span]
+        # update theta y
+        ty_span = np.asscalar(np.diff(theta_ylim)) / 4.
+        theta_ylim = [theta_y_vals[max_id] - ty_span, theta_y_vals[max_id] + ty_span]
 
-    # avgCost = 100 * [np.inf]
-    # for i in range(10000):
-    #   cnt, cost, out = net.train(batch[np.random.randint(batch.shape[0], size=10),:,:,:])
-    #   avgCost.append(cost)
-    #   avgCost.pop(0)
-    #   print('count: {}, cost: {}, avg_cost: {}, sanity: {}'.format(cnt, cost, np.mean(avgCost),
-    #         np.mean(np.abs(out),axis=0)))
-    #   if (params['save_file']):
-    #     if cnt % params['save_interval'] == 0:
-    #       net.save_ckpt('model_saves/model-' + params['save_file'] + "_" + str(params['width']) + 'x' + str(
-    #         params['height']) + '_' + str(cnt))
-    #       print('Model saved')
-    #
-    # # test code
-    # out = net.run_batch(batch)
-    return (tformed, xytheta)
+        # update dxy
+        dxy_span = np.asscalar(np.diff(xy_res)) / 4.
+        xy_res = [dxy_vals[max_id] - dxy_span, dxy_vals[max_id] + dxy_span]
+
+        # update dz
+        dz_span = np.asscalar(np.diff(z_res)) / 4.
+        z_res = [dz_vals[max_id] - dz_span, dz_vals[max_id] + dz_span]
+
+    ## close net
+    tf.reset_default_graph()
+    del netR, netE
+    return max_score,max_param
+
+  def gen_batch(self,IMG,z_loc,theta_x,theta_y,dxy,dz,subsample=False,n_subsample=0):
+    #set xyz resolution
+    mri_affine = copy.deepcopy(self.affine)
+    mri_affine[:2, :] = dxy*mri_affine[:2,:]
+    mri_affine[2, :] = dz*mri_affine[2,:]
+    # x,y,z MRI
+    x_mri = np.array([mri_affine[0][0] * x + mri_affine[0][3] for x in range(self.data.shape[0])])
+    y_mri = np.array([mri_affine[1][1] * y + mri_affine[1][3] for y in range(self.data.shape[1])])
+    z_mri = np.array([mri_affine[2][2] * z + mri_affine[2][3] for z in range(self.data.shape[2])])
+
+    affine_x = np.array([[1, 0, 0, 0],
+                         [0, math.cos(math.radians(theta_x)), -1. * math.sin(math.radians(theta_x)), 0],
+                         [0, math.sin(math.radians(theta_x)), math.cos(math.radians(theta_x)), 0],
+                         [0, 0, 0, 1]])
+
+    affine_y = np.array([[math.cos(math.radians(theta_y)), 0, math.sin(math.radians(theta_y)), 0],
+                         [0, 1, 0, 0],
+                         [-1. * math.sin(math.radians(theta_y)), 0, math.cos(math.radians(theta_y)), 0],
+                         [0, 0, 0, 1]])
+    MAT = np.dot(affine_x, affine_y)
+
+    if subsample:
+      batch = np.zeros(shape=(n_subsample, IMG.images[0].shape[0], IMG.images[0].shape[1], 2))
+      samples = np.random.randint(0,len(IMG.images),n_subsample)
+      for i,samp in enumerate(samples):
+        # Match img to mri
+        img = IMG.images[samp]
+        x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
+        y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
+        z = img.meta['MAT'][2][3] + z_loc
+        XX, YY = np.atleast_2d(x, y)
+        YY = YY.T
+
+        XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
+        YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
+        ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
+        # interp_func = RegularGridInterpolator((x_mri, y_mri, z_mri),self.data,bounds_error=False,
+        #             fill_value=0)
+        # mri = Img.from_array(
+        #     interp_func(np.array([XXX, YYY, ZZZ]).T))
+        mri = Img.from_array(
+          interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False,
+                  fill_value=0))
+        # match intensities with sitk
+        matcher = sitk.HistogramMatchingImageFilter()
+        matcher.SetNumberOfHistogramLevels(512)
+        matcher.SetNumberOfMatchPoints(30)
+        mri = matcher.Execute(sitk.GetImageFromArray(mri,sitk.sitkFloat32),sitk.GetImageFromArray(img,sitk.sitkFloat32))
+        mri = sitk.GetArrayFromImage(mri)
+        #batch[i, :, :, :] = cv2.merge((np.rot90(mri.p_intensity), np.rot90(img.p_intensity)))
+        batch[i, :, :, :] = cv2.merge((mri, img))
+      return batch
+
+    # per section
+    batch = np.zeros(shape=(len(IMG.images), IMG.images[0].shape[0], IMG.images[0].shape[1], 2))
+    for i, img in enumerate(IMG.images):
 
 
-#helper functions
+      x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
+      y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
+      z = img.meta['MAT'][2][3] + z_loc
+      XX, YY = np.atleast_2d(x, y)
+      YY = YY.T
+
+
+      XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
+      YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
+      ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
+      mri = Img.from_array(
+        interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0))
+      matcher = sitk.HistogramMatchingImageFilter()
+      matcher.SetNumberOfHistogramLevels(512)
+      matcher.SetNumberOfMatchPoints(30)
+      mri = matcher.Execute(sitk.GetImageFromArray(mri, sitk.sitkFloat32),
+                            sitk.GetImageFromArray(img, sitk.sitkFloat32))
+      mri = sitk.GetArrayFromImage(mri)
+      batch[i, :, :, :] = cv2.merge((mri, img))
+    return batch
+
 # for p_intensity to ignore zero/background
 def machineEpsilon(func=float):
-     machine_epsilon = func(1)
-     while func(1)+func(machine_epsilon) != func(1):
-         machine_epsilon_last = machine_epsilon
-         machine_epsilon = func(machine_epsilon) / func(2)
-     return machine_epsilon_last
+  machine_epsilon = func(1)
+  while func(1)+func(machine_epsilon) != func(1):
+    machine_epsilon_last = machine_epsilon
+    machine_epsilon = func(machine_epsilon) / func(2)
+  return machine_epsilon_last
 # only handle grayscale images
 def rgb2gray(rgb):
   if len(rgb.shape)>2:
@@ -517,7 +725,7 @@ def get_defaultMETA():
   meta = {'MAT0':affine,'MAT':copy.deepcopy(affine),'fname':None,'parent':None,'Children':{}}
   return meta
 
-
+# theano distributions
 def tpdf(value, lower, c, upper):
   # return ifelse(T.gt(T.concatenate([T.gt(lower,c), T.lt(upper,c), T.gt(lower,upper)]).sum(),0),T.zeros_like(value),T.switch(alltrue_elemwise([lower <= value, value < c]),
   #                 ((value - lower) / ((c - lower))),
@@ -528,24 +736,24 @@ def tpdf(value, lower, c, upper):
   return T.switch(alltrue_elemwise([lower <= value, value < c]),
                   ((value - lower) / ((c - lower) +np.array(1e-32, dtype=theano.config.floatX))),
                   T.switch(T.eq(value, c), (1),
-                  T.switch(alltrue_elemwise([c < value, value <= upper]),
-                  ((upper - value) / ((upper - c) +np.array(1e-32, dtype=theano.config.floatX))), 0)))
-
+                           T.switch(alltrue_elemwise([c < value, value <= upper]),
+                                    ((upper - value) / ((upper - c) +np.array(1e-32, dtype=theano.config.floatX))), 0)))
 
 def gpdf(sample, location, scale):
   divisor = 2 * scale ** 2
   exp_arg = -((sample - location) ** 2) / divisor
   return T.exp(exp_arg)
 
-
 def lpdf(sample, location, scale):
   divisor = 2 * scale  # + epsilon,
   exp_arg = -T.abs_(sample - location) / divisor
   return T.exp(exp_arg)
 
+#similarity function
 def ecc(img0,img1):
   return np.dot(img0.flatten(), img1.flatten()) / np.linalg.norm(img0.flatten()) / np.linalg.norm(img1.flatten())
 
+# pymc models
 def model_ttl(locations, samples, centers, cc,edge):
   basic_model = pm.Model()
   # Xt = locations[0]
@@ -596,7 +804,7 @@ def model_ttl(locations, samples, centers, cc,edge):
 
     # Likelihood (sampling distribution) of observations
     Y_obs = pm.Normal('Y_obs', mu=mu, sd=sigma, observed=samples)
-    trace = pm.sample(2000, njobs=4)
+    trace = pm.sample(2000,njobs=1,step=pm.Metropolis())
 
   pm.summary(trace)
   # values
@@ -683,6 +891,7 @@ def model_ggl(locations, samples, centers, cc):
   #
   # exit()
 
+#object save functions
 def save_obj(var,fname):
   file_handler = open(fname, 'wb')
   pickle.dump(var, file_handler)
@@ -691,6 +900,7 @@ def load_obj(fname):
   filehandler = open(fname, 'rb')
   return pickle.load(filehandler)
 
+# CV2 rigid registration function
 def rigid_reg(fixed,moving):
   warp_mode = cv2.MOTION_EUCLIDEAN
   warp_matrix = np.eye(2, 3, dtype=np.float32)
@@ -722,7 +932,44 @@ def rigid_reg(fixed,moving):
   #plt.show()
   #self.edges[edgeID].view(img2 = node1_transformed)
   return (cc,warp)
+# SITK non rigid reg
+def deformable_reg(fixed,moving):
+  fixed1 = sitk.GetImageFromArray(fixed,sitk.sitkFloat32)
+  moving1 = sitk.GetImageFromArray(moving, sitk.sitkFloat32)
+  demons = sitk.FastSymmetricForcesDemonsRegistrationFilter()
+  demons.SetNumberOfIterations(2000)
+  demons.SetStandardDeviations(5.0)
 
+  warpField = demons.Execute(fixed1,moving1)
+  outTx = sitk.DisplacementFieldTransform(warpField)
+
+  resampler = sitk.ResampleImageFilter()
+  resampler.SetReferenceImage(fixed1)
+  resampler.SetInterpolator(sitk.sitkLinear)
+  resampler.SetDefaultPixelValue(0.)
+  resampler.SetTransform(outTx)
+  moved =sitk.GetArrayFromImage(resampler.Execute(moving1))
+
+  E = get_jacobian_energy(outTx)
+  cc = ecc(fixed,moved)
+  return moved,cc,E
+
+def deformable_reg_batch(batch):
+  cc = [None]*batch.shape[0]
+  E = [None]*batch.shape[0]
+  for i in range(batch.shape[0]):
+    batch[i,:,:,1],cc[i],E[i] = deformable_reg(batch[i,:,:,0],batch[i,:,:,1])
+  return batch,cc,E
+
+def get_jacobian_energy(outTx):
+  Sxy = sitk.GetArrayFromImage(outTx.GetDisplacementField())
+  gx_y,gx_x = np.gradient(Sxy[:,:,0])
+  gy_y,gy_x = np.gradient(Sxy[:,:,1])
+  gx_x += 1
+  gy_y += 1
+  det_j = gx_x*gy_y - gy_x*gx_y
+  return sum(np.square(det_j).flatten())/(Sxy.shape[0]*Sxy.shape[1])
+# misc affine matrix calculations
 def affine_2d_to_3d(affine):
   new = np.eye(4)
   new[0:2,0:2] = affine[0:2,0:2]
@@ -734,7 +981,12 @@ def affine_make_full(affine):
   new[0:affine.shape[0],0:affine.shape[1]] = affine
   return new
 
-
+def affine2d_from_xytheta(xytheta):
+  x,y,theta = xytheta
+  affine = np.array([[math.cos(math.radians(theta)), math.sin(math.radians(theta)), x],
+                     [-1.*math.sin(math.radians(theta)), math.cos(math.radians(theta)), y],
+                     [0, 0, 1]])
+  return affine
 # Checks if a matrix is a valid rotation matrix.
 def isRotationMatrix(R):
   Rt = np.transpose(R)
@@ -743,10 +995,6 @@ def isRotationMatrix(R):
   n = np.linalg.norm(I - shouldBeIdentity)
   return n < 1e-6
 
-
-# Calculates rotation matrix to euler angles
-# The result is the same as MATLAB except the order
-# of the euler angles ( x and z are swapped ).
 def affine_get_params(R):
   assert (isRotationMatrix(R[0:3,0:3]))
 
@@ -769,7 +1017,7 @@ def affine_get_params(R):
 
   return [theta_x, theta_y, theta_z, x, y, z]
 
-def reverse_tform_order(theta,dx,dy):
+def reverse_tform_order(dx,dy,theta):
   # calculate rotate -> translate from translate -> rotate
   dx1 = np.cos(np.deg2rad(theta))*dx - np.sin(np.deg2rad(theta))*dy
   dy1 = np.sin(np.deg2rad(theta))*dx + np.cos(np.deg2rad(theta))*dy

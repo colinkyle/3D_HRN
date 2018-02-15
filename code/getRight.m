@@ -1,5 +1,5 @@
 clc; clear;
-animals = {'35520'};
+animals = {'35481'};
 for id = 1:numel(animals)
     cd(['G:\VSI_DATA\MMU ',animals{id}])
     imgs = file('*.tiff');

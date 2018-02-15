@@ -13,3 +13,7 @@ data/
 model_saves/
 
 trainData/
+
+code/__pycache__/
+
+*.local
