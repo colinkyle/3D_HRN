@@ -473,7 +473,7 @@ class MRI:
     ## estimate transformations
     for _ in tqdm.tqdm(range(ntrain)):
       batch = big_batch[np.random.choice(range(big_batch.shape[0]),nbatch),:,:,:]
-      cnt, cost, out, cost_t = net.train(batch, np.zeros((nbatch,3)))
+      cnt, cost, out, cost_t, _ = net.train(batch, np.zeros((nbatch,3)))
 
       #print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
     return net
