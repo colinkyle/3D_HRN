@@ -96,7 +96,7 @@ mri = MRI('35520_brain_last2.nii')
 fsys.cd('D:/__Atlas__/data/35520/histology')
 IMG = load_obj('35520_hist.obj')
 # calculate histology to MRI
-if True:
+if False:
   fsys.cd('D:/__Atlas__')
   # call some function that:
   # takes ranges for parameters
@@ -127,12 +127,12 @@ if True:
   #   print(.6*np.mean(cost_cc) + .4*p_consistency)
   print(score,param)
 
-if False:
-  z = 0.
-  theta_x = 6.0
-  theta_y = 5.5
-  dxy = 0.921875
-  dz = 0.96875
+if True:
+  z = -0.5 #0
+  theta_x = 8.0# 6.0
+  theta_y = 5.0# 5.5
+  dxy = 0.903125#0.92187
+  dz = 1.11875#0.96875
   params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
             'save_file': 'regNETshallow',
             'save_interval': 1000,
@@ -166,7 +166,7 @@ if False:
   #   ax3.imshow(merged)
   #   plt.show()
   for i in range(batch.shape[0]):
-    plt.figure(figsize=(10, 10))
+    plt.figure(figsize=(15, 15))
     plt.subplot(2, 2, 1)
     #f, (ax1, ax2) = plt.subplots(1, 2, sharey=True,figsize=(20, 7))
     merged = np.dstack(
