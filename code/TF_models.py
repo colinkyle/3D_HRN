@@ -566,14 +566,14 @@ class ElasticNet:
                  self.weight_E_det_j: [1.0],
                  self.weight_E_div: [1.0],
                  self.weight_E_curl: [1.0]}
-    tformed,theta,cost_cc,pix_vals,dxy = self.sess.run([self.moved,self.Theta,self.cost_cc,self.stl.source_points,self.stl.dxy1], feed_dict=feed_dict)
+    tformed,theta,cost_cc,cost = self.sess.run([self.moved,self.Theta,self.cost_cc,self.cost], feed_dict=feed_dict)
 
     # plt.imshow(np.array(batch[0,:,:,1]).squeeze())
     # plt.show()
     #
     # plt.imshow(np.array(tformed[0][:][:][:]).squeeze())
     # plt.show()
-    return tformed,theta,cost_cc,pix_vals,dxy
+    return tformed,theta,cost_cc,cost
 
   def save_ckpt(self, filename):
     self.saver.save(self.sess, filename)
