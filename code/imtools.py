@@ -588,9 +588,9 @@ class MRI:
         for i in range(tformed.shape[0]):
           batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
         tformed, theta, cost_cc, cost = netE.run_batch(batch)
-
+        # compute global cost function
         p_consistency = IMG.score_param_consistency(xytheta)
-        score[pos] = .6*np.mean(cost_cc) + .4*p_consistency - cost
+        score[pos] = .4*np.mean(cost_cc) + .6*p_consistency - cost
         pos+=1
 
       ## update parameter ranges
