@@ -96,7 +96,7 @@ mri = MRI('35520_brain_last2.nii')
 fsys.cd('D:/__Atlas__/data/35520/histology')
 IMG = load_obj('35520_hist.obj')
 # calculate histology to MRI
-if False:
+if True:
   fsys.cd('D:/__Atlas__')
   # call some function that:
   # takes ranges for parameters
@@ -108,8 +108,8 @@ if False:
 
   # set limits (in mm)
   zlim = [-8,8]
-  theta_xlim = [-8,8]
-  theta_ylim = [-8,8]
+  theta_xlim = [-12,12]
+  theta_ylim = [-12,12]
   xy_res = [.8,1.1]
   z_res = [.8,1.1]
   # do search
@@ -127,7 +127,7 @@ if False:
   #   print(.6*np.mean(cost_cc) + .4*p_consistency)
   print(score,param)
 
-if True:
+if False:
   z = -0.5 #0
   theta_x = 8.0# 6.0
   theta_y = 5.0# 5.5
@@ -170,16 +170,23 @@ if True:
     plt.subplot(2, 2, 1)
     #f, (ax1, ax2) = plt.subplots(1, 2, sharey=True,figsize=(20, 7))
     merged = np.dstack(
-        (np.array(batch[i, :, :, 0]), np.array(batch[i, :, :, 1]), np.array(batch[i, :, :, 1])))
+        (np.array(batch[i, :, :, 0]), np.array(batch[i, :, :, 0]), np.array(batch[i, :, :, 0])))
     plt.imshow(merged)
-    #plt.title(cost_cc[i])
+
     plt.subplot(2, 2, 2)
+    # f, (ax1, ax2) = plt.subplots(1, 2, sharey=True,figsize=(20, 7))
+    merged = np.dstack(
+      (np.array(batch[i, :, :, 1]), np.array(batch[i, :, :, 1]), np.array(batch[i, :, :, 1])))
+    plt.imshow(merged)
+
+    #plt.title(cost_cc[i])
+    plt.subplot(2, 2, 3)
     merged = np.dstack(
       (np.array(batch[i, :, :, 0]), np.array(warped[i, :, :, 0]), np.array(warped[i, :, :, 0])))
     plt.imshow(merged)
-    plt.subplot(2, 2, 3)
-    plt.imshow(dxy[i, :, :, 0])
-    plt.colorbar()
+    # plt.subplot(2, 2, 3)
+    # plt.imshow(dxy[i, :, :, 0])
+    # plt.colorbar()
     plt.subplot(2, 2, 4)
     plt.imshow(dxy[i, :, :, 1])
     plt.colorbar()
