@@ -508,7 +508,7 @@ class MRI:
     nspacing = 5
     nbatch = nspacing**5
     n_each_param = 1
-    ntrain = 5000
+    ntrain = [5000, 500, 0, 0]
     ## load net
     print('loading models...')
     # go to training dir
@@ -532,7 +532,7 @@ class MRI:
     max_score = 0
     max_param = [0, 0, 0]
     #loop parameter resolution
-    for _ in range(4):
+    for res in range(4):
       ## gen training batch
       print('\ngenerating training batch...')
 
@@ -574,7 +574,8 @@ class MRI:
       # exit()
 
       # retrain elastic after every rigid? or something?
-      netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain,nbatch=32)
+      if ntrain[res]>0:
+        netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain[res],nbatch=32)
 
       ## compute fits
       print('\ncomputing parameter scores...')
@@ -586,10 +587,10 @@ class MRI:
         tformed, xytheta, _ = netR.run_batch(batch)
         for i in range(tformed.shape[0]):
           batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
-        tformed, theta, cost_cc, pix_vals, dxy = netE.run_batch(batch)
+        tformed, theta, cost_cc, cost = netE.run_batch(batch)
 
         p_consistency = IMG.score_param_consistency(xytheta)
-        score[pos] = .6*np.mean(cost_cc) + .4*p_consistency
+        score[pos] = .6*np.mean(cost_cc) + .4*p_consistency - cost
         pos+=1
 
       ## update parameter ranges
