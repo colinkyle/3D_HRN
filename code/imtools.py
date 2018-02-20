@@ -433,41 +433,6 @@ class MRI:
 
     return (warpList, warpCoef)
 
-  # def reg_to_slice_TF(self,net,IMG,dz=0,theta_x=0,theta_y=0):
-  #
-  #   tformed, xytheta, cost_cc = net.run_batch(batch)
-  #   # for i in range(tformed.shape[0]):
-  #   #   plt.figure()
-  #   #   merged = np.dstack(
-  #   #     (np.array(batch[i, :, :, 0]), 0.*np.array(batch[i, :, :, 1]), np.array(tformed[i][:][:][:]).squeeze()))
-  #   #   plt.imshow(merged)
-  #   #   plt.show()
-  #
-  #   #test code
-  #   #out = net.run_batch(batch)
-  #
-  #   # avgCost = 100 * [np.inf]
-  #   # for i in range(10000):
-  #   #   cnt, cost, out = net.train(batch[np.random.randint(batch.shape[0], size=10),:,:,:])
-  #   #   avgCost.append(cost)
-  #   #   avgCost.pop(0)
-  #   #   print('count: {}, cost: {}, avg_cost: {}, sanity: {}'.format(cnt, cost, np.mean(avgCost),
-  #   #         np.mean(np.abs(out),axis=0)))
-  #   #   if (params['save_file']):
-  #   #     if cnt % params['save_interval'] == 0:
-  #   #       net.save_ckpt('model_saves/model-' + params['save_file'] + "_" + str(params['width']) + 'x' + str(
-  #   #         params['height']) + '_' + str(cnt))
-  #   #       print('Model saved')
-  #   #
-  #   # # test code
-  #   # out = net.run_batch(batch)
-  #   #net.sess.close()
-  #   #net.sess.reset(tf.DIRECT_SESSION)
-  #
-  #   del net
-  #
-  #   return (tformed, xytheta, cost_cc)
-
   def retrain_TF(self,net,big_batch,ntrain=500,nbatch=10):
     print('\nretraining model...')
     ## estimate transformations
@@ -508,7 +473,7 @@ class MRI:
     nspacing = 5
     nbatch = nspacing**5
     n_each_param = 1
-    ntrain = [5000, 500, 0, 0]
+    ntrain = [5000, 500, 200, 200]
     ## load net
     print('loading models...')
     # go to training dir
@@ -694,8 +659,7 @@ class MRI:
       XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
       YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
       ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
-      mri = Img.from_array(
-        interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0))
+      mri = interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0)
       matcher = sitk.HistogramMatchingImageFilter()
       matcher.SetNumberOfHistogramLevels(512)
       matcher.SetNumberOfMatchPoints(30)
