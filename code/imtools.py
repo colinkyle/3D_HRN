@@ -144,7 +144,7 @@ class Img(np.ndarray):
 
     return affine #np.dot(affine_og, np.dot(affine_rot, affine_trans))
 
-  def write_affine(self,MAT):
+  def set_affine(self,MAT):
     self.meta['MAT'] = MAT
 
   def get_affine_2D(self):
@@ -332,7 +332,6 @@ class Img3D:
 
   def rigid_reg(self,edgeID):
     (cc, warp_matrix) = rigid_reg(self.edges[edgeID].node0.p_intensity,self.edges[edgeID].node1.p_intensity)
-    #self.edges[edgeID].view(img2 = node1_transformed)
     return (cc,warp_matrix)
 
   def score_param_consistency(self,xytheta):
