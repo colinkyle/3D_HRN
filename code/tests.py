@@ -108,10 +108,10 @@ if True:
 
   # set limits (in mm)
   zlim = [-8,8]
-  theta_xlim = [-12,12]
-  theta_ylim = [-12,12]
-  xy_res = [.8,1.1]
-  z_res = [.8,1.1]
+  theta_xlim = [-15,15]
+  theta_ylim = [-15,15]
+  xy_res = [.7,1.1]
+  z_res = [.7,0.9]
   # do search
 
   score,param = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res)
@@ -128,11 +128,11 @@ if True:
   print(score,param)
 
 if False:
-  z = -0.5 #0
-  theta_x = 8.0# 6.0
-  theta_y = 5.0# 5.5
-  dxy = 0.903125#0.92187
-  dz = 1.11875#0.96875
+  z = -1.0#-0.5 #0
+  theta_x = 7.5#8.0# 6.0
+  theta_y = 4.5#5.0# 5.5
+  dxy = 0.89375#0.903125#0.92187
+  dz = 1.053125#1.11875#0.96875
   params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
             'save_file': 'regNETshallow',
             'save_interval': 1000,
@@ -155,7 +155,7 @@ if False:
   params['save_file'] = 'Elastic2'
   net2 = ElasticNet(params)
   net2 = mri.retrain_TF_E(net2, batch, ntrain=2000, nbatch=32)
-  warped, theta, cost_cc, pix_vals, dxy = net2.run_batch(batch)
+  warped, theta, cost_cc, cost = net2.run_batch(batch)
   #warped,cc,E = deformable_reg_batch(batch)
   # for i in range(batch.shape[0]):
   #   f, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True,figsize=(20, 7))
@@ -187,7 +187,7 @@ if False:
     # plt.subplot(2, 2, 3)
     # plt.imshow(dxy[i, :, :, 0])
     # plt.colorbar()
-    plt.subplot(2, 2, 4)
-    plt.imshow(dxy[i, :, :, 1])
-    plt.colorbar()
+    # plt.subplot(2, 2, 4)
+    # plt.imshow(dxy[i, :, :, 1])
+    # plt.colorbar()
     plt.show()
