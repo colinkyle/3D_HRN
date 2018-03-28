@@ -467,16 +467,136 @@ class MRI:
     return netR, netE
     #helper functions
 
-  def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res):
+  # def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res):
+  #   # variables
+  #   nspacing = 5
+  #   nbatch = nspacing**5
+  #   n_each_param = 1
+  #   ntrain = [5000, 500, 200, 200]
+  #   ## load net
+  #   print('loading models...')
+  #   # go to training dir
+  #   fsys.cd('D:/Dropbox/__Atlas__')
+  #   params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
+  #             'save_file': 'regNETshallow',
+  #             'save_interval': 1000,
+  #             'batch_size': 32,
+  #             'lr': .0001,  # Learning rate
+  #             'rms_decay': 0.9,  # RMS Prop decay
+  #             'rms_eps': 1e-8,  # RMS Prop epsilon
+  #             'width': 265,
+  #             'height': 257,
+  #             'numParam': 3,
+  #             'train': True}
+  #   netR = AtlasNet(params)
+  #   params['load_file'] = 'D:/__Atlas__/model_saves/model-Elastic2_257x265_1000'
+  #   params['save_file'] = 'Elastic2'
+  #   netE = ElasticNet(params)
+  #
+  #   param_dist = []
+  #   max_score = 0
+  #   max_param = [0, 0, 0]
+  #   #loop parameter resolution
+  #   for res in range(4):
+  #     ## gen training batch
+  #     print('\ngenerating training batch...')
+  #
+  #     z_vals = []#np.random.randint(zlim[0],zlim[1],nbatch)
+  #     theta_x_vals = []
+  #     theta_y_vals = []
+  #     dxy_vals = []
+  #     dz_vals = []
+  #     zs = np.linspace(zlim[0],zlim[1], nspacing)
+  #     txs = np.linspace(theta_xlim[0], theta_xlim[1], nspacing)
+  #     tys = np.linspace(theta_ylim[0], theta_ylim[1], nspacing)
+  #     dxys = np.linspace(xy_res[0], xy_res[1], nspacing)
+  #     dzs = np.linspace(z_res[0], z_res[1], nspacing)
+  #
+  #     for z in zs:
+  #       for tx in txs:
+  #         for ty in tys:
+  #           for dxy in dxys:
+  #             for dz in dzs:
+  #               z_vals.append(z)
+  #               theta_x_vals.append(tx)
+  #               theta_y_vals.append(ty)
+  #               dxy_vals.append(dxy)
+  #               dz_vals.append(dz)
+  #
+  #
+  #     big_batch = np.zeros(shape=(n_each_param*nbatch,params['width'],params['height'],2),dtype=np.float32)
+  #
+  #     pos = (0,n_each_param)
+  #     for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
+  #       big_batch[pos[0]:pos[1],:,:,:] = self.gen_batch(IMG,z,tx,ty,dxy,dz,subsample=True,n_subsample=n_each_param)#[np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
+  #       pos = (pos[0]+n_each_param,pos[1]+n_each_param)
+  #
+  #     # retrain networks
+  #     if ntrain[res]>0:
+  #       netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain[res],nbatch=32)
+  #
+  #     ## compute fits
+  #     print('\ncomputing parameter scores...')
+  #     score = np.zeros(shape=(nbatch,))
+  #     pos = 0
+  #     for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
+  #       batch = self.gen_batch(IMG,z,tx,ty,dxy,dz)
+  #       #run rigid
+  #       tformed, xytheta, _ = netR.run_batch(batch)
+  #       for i in range(tformed.shape[0]):
+  #         batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
+  #
+  #       #run elastic
+  #       tformed, theta, cost_cc, cost = netE.run_batch(batch)
+  #       # compute global cost function
+  #       p_consistency = IMG.score_param_consistency(xytheta)
+  #       score[pos] = .4*np.mean(cost_cc) + .6*p_consistency - cost
+  #       pos+=1
+  #
+  #     ## update parameter ranges
+  #     param_dist.append(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals,score))
+  #     plt.figure()
+  #     n,bins,_ = plt.hist(score)
+  #     plt.show()
+  #     max_id = np.argmax(score)
+  #     print('\nmax score:',np.max(score), 'pos:',z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id])
+  #
+  #     if np.max(score)> max_score:
+  #       max_score = np.max(score)
+  #       max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id]]
+  #       #update z
+  #       z_span = np.asscalar(np.diff(zlim))/4.
+  #       zlim = [z_vals[max_id] - z_span, z_vals[max_id] + z_span]
+  #       # update theta x
+  #       tx_span = np.asscalar(np.diff(theta_xlim)) / 4.
+  #       theta_xlim = [theta_x_vals[max_id] - tx_span, theta_x_vals[max_id] + tx_span]
+  #       # update theta y
+  #       ty_span = np.asscalar(np.diff(theta_ylim)) / 4.
+  #       theta_ylim = [theta_y_vals[max_id] - ty_span, theta_y_vals[max_id] + ty_span]
+  #
+  #       # update dxy
+  #       dxy_span = np.asscalar(np.diff(xy_res)) / 4.
+  #       xy_res = [dxy_vals[max_id] - dxy_span, dxy_vals[max_id] + dxy_span]
+  #
+  #       # update dz
+  #       dz_span = np.asscalar(np.diff(z_res)) / 4.
+  #       z_res = [dz_vals[max_id] - dz_span, dz_vals[max_id] + dz_span]
+  #
+  #   ## close net
+  #   tf.reset_default_graph()
+  #   del netR, netE
+  #   return max_score,max_param,param_dist
+
+  def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res):
     # variables
-    nspacing = 5
-    nbatch = nspacing**5
+    nspacing = 7
+    nbatch = nspacing**4
     n_each_param = 1
     ntrain = [5000, 500, 200, 200]
     ## load net
     print('loading models...')
     # go to training dir
-    fsys.cd('D:/Dropbox/__Atlas__')
+    fsys.cd('D:/__Atlas__')
     params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
               'save_file': 'regNETshallow',
               'save_interval': 1000,
@@ -493,6 +613,7 @@ class MRI:
     params['save_file'] = 'Elastic2'
     netE = ElasticNet(params)
 
+    param_dist = []
     max_score = 0
     max_param = [0, 0, 0]
     #loop parameter resolution
@@ -504,69 +625,66 @@ class MRI:
       theta_x_vals = []
       theta_y_vals = []
       dxy_vals = []
-      dz_vals = []
+
       zs = np.linspace(zlim[0],zlim[1], nspacing)
       txs = np.linspace(theta_xlim[0], theta_xlim[1], nspacing)
       tys = np.linspace(theta_ylim[0], theta_ylim[1], nspacing)
       dxys = np.linspace(xy_res[0], xy_res[1], nspacing)
-      dzs = np.linspace(z_res[0], z_res[1], nspacing)
 
       for z in zs:
         for tx in txs:
           for ty in tys:
             for dxy in dxys:
-              for dz in dzs:
-                z_vals.append(z)
-                theta_x_vals.append(tx)
-                theta_y_vals.append(ty)
-                dxy_vals.append(dxy)
-                dz_vals.append(dz)
+              z_vals.append(z)
+              theta_x_vals.append(tx)
+              theta_y_vals.append(ty)
+              dxy_vals.append(dxy)
 
 
       big_batch = np.zeros(shape=(n_each_param*nbatch,params['width'],params['height'],2),dtype=np.float32)
 
       pos = (0,n_each_param)
-      for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
-        big_batch[pos[0]:pos[1],:,:,:] = self.gen_batch(IMG,z,tx,ty,dxy,dz,subsample=True,n_subsample=n_each_param)#[np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
+      for z,tx,ty,dxy in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals)):
+        big_batch[pos[0]:pos[1],:,:,:] = self.gen_batch(IMG,z,tx,ty,dxy,dxy,subsample=True,n_subsample=n_each_param)#[np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
         pos = (pos[0]+n_each_param,pos[1]+n_each_param)
-      ## retrain network
-      # plt.figure()
-      # merged = np.dstack(
-      #   (np.array(big_batch[0, :, :, 0]), np.array(big_batch[0, :, :, 1]), np.array(big_batch[0, :, :, 1])))
-      # plt.imshow(merged)
-      # plt.show()
-      # exit()
 
-      # retrain elastic after every rigid? or something?
-      if ntrain[res]>0:
+      # retrain networks
+      if ntrain[res] > 0:
         netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain[res],nbatch=32)
 
       ## compute fits
       print('\ncomputing parameter scores...')
       score = np.zeros(shape=(nbatch,))
+      each_score = np.zeros(shape=(nbatch,3))
       pos = 0
-      for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
-        batch = self.gen_batch(IMG,z,tx,ty,dxy,dz)
-        #batch = self.gen_batch(IMG,z,tx,ty)
+      for z,tx,ty,dxy in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals)):
+        batch = self.gen_batch(IMG,z,tx,ty,dxy,dxy)
+        #run rigid
         tformed, xytheta, _ = netR.run_batch(batch)
         for i in range(tformed.shape[0]):
           batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
+
+        #run elastic
         tformed, theta, cost_cc, cost = netE.run_batch(batch)
         # compute global cost function
         p_consistency = IMG.score_param_consistency(xytheta)
         score[pos] = .4*np.mean(cost_cc) + .6*p_consistency - cost
+        each_score[pos,0] = cost_cc
+        each_score[pos,1] = p_consistency
+        each_score[pos,2] = cost
         pos+=1
 
       ## update parameter ranges
+      param_dist.append(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,score,each_score.T.tolist()[0],each_score.T.tolist()[1],each_score.T.tolist()[2]))
       plt.figure()
       n,bins,_ = plt.hist(score)
       plt.show()
       max_id = np.argmax(score)
-      print('\nmax score:',np.max(score), 'pos:',z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id])
+      print('\nmax score:',np.max(score), 'pos:',z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id])
 
       if np.max(score)> max_score:
         max_score = np.max(score)
-        max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id]]
+        max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id]]
         #update z
         z_span = np.asscalar(np.diff(zlim))/4.
         zlim = [z_vals[max_id] - z_span, z_vals[max_id] + z_span]
@@ -581,14 +699,11 @@ class MRI:
         dxy_span = np.asscalar(np.diff(xy_res)) / 4.
         xy_res = [dxy_vals[max_id] - dxy_span, dxy_vals[max_id] + dxy_span]
 
-        # update dz
-        dz_span = np.asscalar(np.diff(z_res)) / 4.
-        z_res = [dz_vals[max_id] - dz_span, dz_vals[max_id] + dz_span]
 
     ## close net
     tf.reset_default_graph()
     del netR, netE
-    return max_score,max_param
+    return max_score,max_param,param_dist
 
   def gen_batch(self,IMG,z_loc,theta_x,theta_y,dxy,dz,subsample=False,n_subsample=0):
     #set xyz resolution
@@ -637,8 +752,8 @@ class MRI:
         matcher = sitk.HistogramMatchingImageFilter()
         matcher.SetNumberOfHistogramLevels(512)
         matcher.SetNumberOfMatchPoints(30)
-        mri = matcher.Execute(sitk.GetImageFromArray(mri,sitk.sitkFloat32),sitk.GetImageFromArray(img,sitk.sitkFloat32))
-        mri = sitk.GetArrayFromImage(mri)
+        img = matcher.Execute(sitk.GetImageFromArray(img,sitk.sitkFloat32),sitk.GetImageFromArray(mri,sitk.sitkFloat32))
+        img = sitk.GetArrayFromImage(img)
         #batch[i, :, :, :] = cv2.merge((np.rot90(mri.p_intensity), np.rot90(img.p_intensity)))
         batch[i, :, :, :] = cv2.merge((mri, img))
       return batch
@@ -658,13 +773,15 @@ class MRI:
       XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
       YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
       ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
-      mri = interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False, fill_value=0)
+      mri = Img.from_array(
+        interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T,
+                bounds_error=False, fill_value=0))
       matcher = sitk.HistogramMatchingImageFilter()
       matcher.SetNumberOfHistogramLevels(512)
       matcher.SetNumberOfMatchPoints(30)
-      mri = matcher.Execute(sitk.GetImageFromArray(mri, sitk.sitkFloat32),
-                            sitk.GetImageFromArray(img, sitk.sitkFloat32))
-      mri = sitk.GetArrayFromImage(mri)
+      img = matcher.Execute(sitk.GetImageFromArray(img, sitk.sitkFloat32),
+                            sitk.GetImageFromArray(mri, sitk.sitkFloat32))
+      img = sitk.GetArrayFromImage(img)
       batch[i, :, :, :] = cv2.merge((mri, img))
     return batch
 

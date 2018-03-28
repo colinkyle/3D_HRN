@@ -8,7 +8,7 @@ import numpy as np
 from TF_models import AtlasNet, ElasticNet
 
 
-fsys.cd('D:/__Atlas__/data/35520/histology')
+fsys.cd('D:/__Atlas__/data/21899/histology')
 
 # generate edge network
 if False:
@@ -90,11 +90,11 @@ if False:
 
     metaList.append(meta)
 # load MRI
-fsys.cd('D:/__Atlas__/data/35520/mri')
-mri = MRI('35520_brain_last2.nii')
+fsys.cd('D:/__Atlas__/data/21899/mri')
+mri = MRI('21899_final2.nii')
 #mri.affine = .885*mri.affine
-fsys.cd('D:/__Atlas__/data/35520/histology')
-IMG = load_obj('35520_hist.obj')
+fsys.cd('D:/__Atlas__/data/21899/histology')
+IMG = load_obj('21899_hist.obj')
 # calculate histology to MRI
 if True:
   fsys.cd('D:/__Atlas__')
@@ -107,14 +107,16 @@ if True:
   #     2. Samples parameter space, registers, computes cost, updates parameters
 
   # set limits (in mm)
-  zlim = [-8,8]
+  zlim = [-12,12]
   theta_xlim = [-15,15]
   theta_ylim = [-15,15]
   xy_res = [.7,1.1]
-  z_res = [.7,0.9]
+  #z_res = [.7,1.1]
   # do search
 
-  score,param = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res)
+  #score,param,param_dist = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res)
+  score, param, param_dist = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res)
+  save_obj(param_dist,'parameter_distribution.obj')
   # for z in range(-15,-4):
   #   (warpList, warpParam, cost_cc) = mri.reg_to_slice_TF(IMG,dz=1,theta_x=z,theta_y=0)
   #   print(z,np.mean(cost_cc))
@@ -125,14 +127,15 @@ if True:
   #   # test fit
   #   p_consistency = IMG.score_param_consistency(warpParam)
   #   print(.6*np.mean(cost_cc) + .4*p_consistency)
+
   print(score,param)
 
 if False:
-  z = -1.0#-0.5 #0
-  theta_x = 7.5#8.0# 6.0
-  theta_y = 4.5#5.0# 5.5
-  dxy = 0.89375#0.903125#0.92187
-  dz = 1.053125#1.11875#0.96875
+  z = -1.5#-1.5#-0.5 #0
+  theta_x = 3.75#3.75#7.5#8.0# 6.0
+  theta_y = -1.875#5.5#5.625#4.5#5.0# 5.5
+  dxy = 0.9#0.9#0.89375#0.903125#0.92187
+  dz = 1.075#0.925#1.053125#1.11875#0.96875
   params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
             'save_file': 'regNETshallow',
             'save_interval': 1000,
