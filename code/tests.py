@@ -111,7 +111,7 @@ if True:
   theta_xlim = [-15,15]
   theta_ylim = [-15,15]
   xy_res = [.7,1.1]
-  #z_res = [.7,1.1]
+  z_res = [.7,1.1]
   # do search
 
   #score,param,param_dist = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res)
