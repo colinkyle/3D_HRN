@@ -182,7 +182,7 @@ class Edge:
     self.dz = img1.meta['MAT0'][2][3] - img0.meta['MAT0'][2][3]
 
     self.param_x = [-self.node1.shape[0]/2, 0, self.node1.shape[0]/2]
-    self.param_y = [-self.node1.shape[0]/2, 0, self.node1.shape[0]/2]
+    self.param_y = [0, 6]
     self.param_theta = [0, 6]
 
   def p_x(self,dx):
@@ -196,12 +196,9 @@ class Edge:
       return None
 
   def p_y(self,dy):
-
     if self.param_y[0]:
-      c = (self.param_y[1] - self.param_y[0]) / (self.param_y[2] - self.param_y[0])
-      loc = self.param_y[0]
-      scale = self.param_y[2] - self.param_y[0]
-      return stats.triang.pdf(dy, c=c, loc=loc, scale=scale)/(stats.triang.pdf(self.param_y[1], c=c, loc=loc, scale=scale) + machineEpsilon() )
+      return stats.norm.pdf(dy, loc=self.param_y[0], scale=self.param_y[1]) / stats.norm.pdf(
+        self.param_y[0], loc=self.param_y[0], scale=self.param_y[1])
     else:
       return None
 
@@ -316,7 +313,7 @@ class Img3D:
       Y1 = np.array(Y, dtype=theano.config.floatX)
       Theta1 = np.array(Theta, dtype=theano.config.floatX)
 
-      Error = model_ttl([X1,Y1,Theta1],p_xytheta,[dx,dy,dtheta],cc,edge)
+      Error = model_tgl([X1,Y1,Theta1],p_xytheta,[dx,dy,dtheta],cc,edge)
       print('Error',Error)
 
       # Yhat = tpdf(X1,edge.param_x[0],edge.param_x[1],edge.param_x[2]).eval()*tpdf(Y1,edge.param_y[0],edge.param_y[1],edge.param_y[2]).eval() * lpdf(Theta1,edge.param_theta[0],edge.param_theta[1]).eval()
@@ -837,16 +834,6 @@ def ecc(img0,img1):
 # pymc models
 def model_ttl(locations, samples, centers, cc,edge):
   basic_model = pm.Model()
-  # Xt = locations[0]
-  # Yt = locations[1]
-  # Thetat = locations[2]
-  #
-  # # Y1 = np.array(Y, dtype=theano.config.floatX)
-  # Samplest = np.array(samples,dtype=theano.config.floatX)
-  # center1 = np.array(centers[0],dtype=theano.config.floatX)
-  # center2 = np.array(centers[1],dtype=theano.config.floatX)
-  # center3 = np.array(centers[2],dtype=theano.config.floatX)
-  # cct = np.array(cc,dtype=theano.config.floatX)
 
   with basic_model:
     # Priors for unknown model parameters
@@ -860,19 +847,6 @@ def model_ttl(locations, samples, centers, cc,edge):
 
     m3 = centers[2]
     s3 = pm.HalfNormal('s3', sd=20)
-
-    ## debug
-    # fun = theano.function(
-    #   [Xt, l1, m1, u1], tpdf,
-    #   mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
-    # )
-    # fun2 = theano.function(
-    #   [Yt, l2, m2, u2], tpdf,
-    #   mode=NanGuardMode(nan_is_error=True, inf_is_error=True, big_is_error=True)
-    # )
-    # p_x = fun(Xt, l1, m1, u1)
-    # p_y = fun2(Yt, l2, m2, u2)
-    ## end debug
 
     p_x = tpdf(locations[0], l1, m1, u1)
     p_y = tpdf(locations[1], l2, m2, u2)
@@ -971,6 +945,58 @@ def model_ggl(locations, samples, centers, cc):
   # plt.show()
   #
   # exit()
+
+def model_tgl(locations, samples, centers, cc,edge):
+  basic_model = pm.Model()
+
+  with basic_model:
+    # Priors for unknown model parameters
+    l1 = pm.Normal('l1', mu=edge.param_x[0], sd=edge.node0.shape[0]/85)
+    m1 = centers[0]
+    u1 = pm.Normal('u1', mu=edge.param_x[2], sd=edge.node0.shape[0]/85)
+
+    s2 = pm.Normal('s2', sd=20)
+    m2 = centers[1]
+
+    m3 = centers[2]
+    s3 = pm.HalfNormal('s3', sd=20)
+
+    p_x = tpdf(locations[0], l1, m1, u1)
+    p_y = gpdf(locations[1], m2, s2)
+    p_theta = lpdf(locations[2], m3, s3)
+
+    sigma = pm.HalfNormal('sigma', sd=1)
+
+    # Expected value of outcome
+    mu = cc * p_x * p_y * p_theta
+
+    # Likelihood (sampling distribution) of observations
+    Y_obs = pm.Normal('Y_obs', mu=mu, sd=sigma, observed=samples)
+    trace = pm.sample(2000,njobs=1,step=pm.Metropolis())
+
+  pm.summary(trace)
+  # values
+  L1 = np.mean(trace['l1'])
+  M1 = centers[0]
+  U1 = np.mean(trace['u1'])
+
+  M2 = centers[1]
+  S2 = np.mean(trace['s2'])
+
+  M3 = centers[2]
+  S3 = np.mean(trace['s3'])
+
+  p_x = tpdf(locations[0], L1, M1, U1).eval()
+  p_y = gpdf(locations[1], M2, S2).eval()
+  p_theta = lpdf(locations[2], M3, S3).eval()
+  mu = cc * p_x * p_y * p_theta
+  Err = np.sum((samples - mu) ** 2)
+  #print(Err)
+
+  edge.param_x = [L1, M1, U1]
+  edge.param_y = [M2, S2]
+  edge.param_theta = [M3, S3]
+  return Err
 
 #object save functions
 def save_obj(var,fname):
