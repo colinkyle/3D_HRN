@@ -211,7 +211,7 @@ class Edge:
   def sample_xytheta(self,nsamples = 500):
     x = np.random.triangular(self.param_x[0],self.param_x[1],self.param_x[2],size=nsamples)
 
-    y = np.random.triangular(self.param_y[0],self.param_y[1],self.param_y[2],size=nsamples)
+    y = np.random.normal(self.param_y[0],self.param_y[1],size=nsamples)
 
     theta = np.random.laplace(self.param_theta[0],self.param_theta[1],size=nsamples)
 

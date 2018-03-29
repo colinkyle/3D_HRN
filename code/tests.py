@@ -8,15 +8,18 @@ import numpy as np
 from TF_models import AtlasNet, ElasticNet
 
 
-fsys.cd('D:/__Atlas__/data/21899/histology')
+fsys.cd('/Users/Colin/Dropbox/__Atlas__/data/21899/histology')
 
 # generate edge network
-if False:
+if True:
   # Build neighbor distributions
   IMG = Img3D(fsys.file('*.tiff'))
   metaList = []
   pixel_size = 0.244
   section_size = .120
+  locs = [int(re.search('[0-9]*[N]', IMG.fList[i]).group(0)[0:-1]) for i in range(len(IMG.fList)) if
+          re.search('[0-9]*[N]', IMG.fList[i])]
+  z_middle = (max(locs) + min(locs)) / 2.
   for i,f in enumerate(IMG.fList):
     meta = get_defaultMETA()
     meta['fname'] = f
@@ -39,56 +42,20 @@ if False:
     meta['MAT0'][1][3] = -pixel_size * IMG.images[i].shape[1] / 2
 
     # set z offset
-    meta['MAT'][2][3] = pixel_size * (i - len(IMG.images) / 2)
-    meta['MAT0'][2][3] = pixel_size * (i - len(IMG.images) / 2)
+    z_pos = int(re.search('[0-9]*[N]', f).group(0)[0:-1])
+    z_mm = .12 * (z_pos - z_middle)
+    meta['MAT'][2][3] = z_mm
+    meta['MAT0'][2][3] = z_mm
 
     metaList.append(meta)
 
   IMG.update_meta(metaList)
   IMG.build_edge_net(3)
   IMG.estimate_edge_distributions()
-  save_obj(IMG,'35520_hist.obj')
+  save_obj(IMG,'21899_hist.obj')
   print('Done!')
   exit()
-# load histology and edge network
-#IMG = load_obj('TestImg3D.obj')
-if False:
-  IMG = load_obj('35520_hist.obj')
-  metaList = []
-  pixel_size = 0.244
-  section_size = .120
 
-  locs = [int(re.search('[0-9]*[N]', IMG.fList[i]).group(0)[0:-1]) for i in range(len(IMG.fList)) if
-          re.search('[0-9]*[N]', IMG.fList[i])]
-  z_middle = (max(locs) + min(locs)) / 2.
-  for i, f in enumerate(IMG.fList):
-    meta = get_defaultMETA()
-    meta['fname'] = f
-    # set x
-    meta['MAT'][0][0] = pixel_size
-    meta['MAT0'][0][0] = pixel_size
-    # set y
-    meta['MAT'][1][1] = pixel_size
-    meta['MAT0'][1][1] = pixel_size
-    # set z
-    meta['MAT'][2][2] = section_size
-    meta['MAT0'][2][2] = section_size
-
-    # set x offset
-    meta['MAT'][0][3] = -pixel_size * IMG.images[i].shape[0] / 2
-    meta['MAT0'][0][3] = -pixel_size * IMG.images[i].shape[0] / 2
-
-    # set y offset
-    meta['MAT'][1][3] = -pixel_size * IMG.images[i].shape[1] / 2
-    meta['MAT0'][1][3] = -pixel_size * IMG.images[i].shape[1] / 2
-
-    # set z offset
-    z_pos = int(re.search('[0-9]*[N]',f).group(0)[0:-1])
-    z_mm = .12 * (z_pos - z_middle)
-    meta['MAT'][2][3] = z_mm
-    meta['MAT0'][2][3] = z_mm
-
-    metaList.append(meta)
 # load MRI
 fsys.cd('D:/__Atlas__/data/21899/mri')
 mri = MRI('21899_final2.nii')
