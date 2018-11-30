@@ -1,13 +1,15 @@
-*
 !.gitignore
 !*/code
 
 
 \.idea/
 
-data/
-!*/data/30890_/histology/segmented/*
-!*/data/30890_/mri/*
+!data/
+data/*
+!data/30890_/*
+data/30890_/masks/
+data/30890_/mri/_30890_.nii
+!data/30890_/histology/*
 
 model_saves/
 
@@ -28,8 +30,13 @@ code/.idea/
 code/.ipynb_checkpoints
 
 parameter_distribution.obj
+parameter_distribution_high_reg.obj
 
 !LICENSE.md
 !README.md
 
+
 *.local
+*.pdf
+*.txt
+

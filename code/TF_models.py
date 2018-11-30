@@ -4,7 +4,6 @@ from __future__ import print_function
 import tensorflow as tf
 import math
 
-
 class RigidNet:
 	"""
 	CNN and rigid Spatial Transformer Network
@@ -678,7 +677,6 @@ class TpsNet:
 														  feed_dict=feed_dict)
 		return moved, cost_cc
 
-
 class ElasticTransformer(object):
 	"""Spatial Elastic Transformer Layer with Thin Plate Spline deformations
 
@@ -885,14 +883,12 @@ class ElasticTransformer(object):
 
 		return pixel_distances, L_inv
 
-
 def _interpolate(im, x, y, out_size, method):
 	if method == 'bilinear':
 		return bilinear_interp(im, x, y, out_size)
 	# if method == 'bicubic':
 	# 	return bicubic_interp(im, x, y, out_size)
 	return None
-
 
 def bilinear_interp(im, x, y, out_size):
 	with tf.variable_scope('bilinear_interp'):
@@ -953,12 +949,10 @@ def bilinear_interp(im, x, y, out_size):
 		output = tf.add_n([w00 * I00, w01 * I01, w10 * I10, w11 * I11])
 		return output
 
-
 def _repeat(x, n_repeats):
 	with tf.variable_scope('_repeat'):
 		rep = tf.tile(tf.expand_dims(x, 1), [1, n_repeats])
 		return tf.reshape(rep, [-1])
-
 
 # class TrainTForm:
 # 	def __init__(self, params):
@@ -1150,7 +1144,6 @@ def _repeat(x, n_repeats):
 # 			output = _transform(self, self.xytheta, self.moving, out_size)
 # 			return output
 
-
 def ncc(x, y):
 	"""
 	computes normalized cross correlation
@@ -1168,7 +1161,6 @@ def ncc(x, y):
 	stddev_y = tf.reduce_sum(tf.sqrt(
 		mean_y2 - tf.square(mean_y)), [1, 2, 3], keep_dims=True)
 	return tf.reduce_mean((x - mean_x) * (y - mean_y) / (stddev_x * stddev_y))
-
 
 # def batch_transformer(U, thetas, out_size, name='BatchSpatialTransformer'):
 # 	"""Batch Spatial Transformer Layer
