@@ -1,19 +1,35 @@
+*
 !.gitignore
 !*/code
+
+
 \.idea/
 
+data/
+!*/data/30890_/histology/segmented/*
+!*/data/30890_/mri/*
+
+model_saves/
+
+mri_skull_stripping/
+
 Papers/
+
+Segmentation/
 
 Simulated/
 
 Train_nonbrain/
 
-data/
-
-model_saves/
-
 trainData/
 
 code/__pycache__/
+code/.idea/
+code/.ipynb_checkpoints
+
+parameter_distribution.obj
+
+!LICENSE.md
+!README.md
 
 *.local

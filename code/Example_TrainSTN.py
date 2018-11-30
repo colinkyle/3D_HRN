@@ -1,5 +1,4 @@
 import sys
-
 import tifffile
 import copy
 import cv2
@@ -10,10 +9,10 @@ from TF_models import AtlasNet, TrainTForm, ElasticNet
 import fsys
 import matplotlib.pyplot as plt
 
-## TO DO:
-
-## params for neural network
+## Set params for neural network
+# load file: Full path to saved model or None
 params = {'load_file': 'D:/__Atlas__/model_saves/model-Elastic2_257x265_146000',
+		  #save file: Unique string for model saves
 		  'save_file': 'Elastic2',
 		  'save_interval': 1000,
 		  'batch_size': 32,
@@ -23,10 +22,13 @@ params = {'load_file': 'D:/__Atlas__/model_saves/model-Elastic2_257x265_146000',
 		  'width': 257,
 		  'height': 265,
 		  'numParam': 3,
-		  'train': True}
+		  'train': True, # Enables/Disables dropout
+		  }
+
 
 # go to training dir
 fsys.cd('D:/__Atlas__')
+if True:#train rigid Net
 
 ## initialize net
 # net = AtlasNet(params)
@@ -52,7 +54,7 @@ train_files = fsys.file('trainData/*')
 # train network
 avgCost = 100 * [np.inf]
 avgCost2 = 100 * [np.inf]
-#train_tform = TrainTForm({'width': 257, 'height': 265})
+train_tform = TrainTForm({'width': 257, 'height': 265})
 
 for itrain in range(490000):
 	# get batch files
