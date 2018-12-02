@@ -303,7 +303,7 @@ class Img3D:
 				  'height': 257,
 				  'numParam': 3,
 				  'train': True}
-		netR = AtlasNet(params)
+		netR = RigidNet(params)
 		# Loop edges
 
 		for edge_id, edge in self.edges.items():
@@ -340,7 +340,7 @@ class Img3D:
 
 			for b in range(int((grid_size**3)/batch_size)):
 				#print(Xform[b * 80:b * 80 + 80])
-				tformed, xytheta, theta2, cost_cc = netR.transform_batch(batch, Xform[b * batch_size:b * batch_size + batch_size])
+				tformed, cost_cc = netR.transform_with_xytheta(batch, Xform[b * batch_size:b * batch_size + batch_size])
 				X, Y, Z = x[b * batch_size:b * batch_size + batch_size], y[b * batch_size:b * batch_size + batch_size], z[b * batch_size:b * batch_size + batch_size]
 				for i in range(tformed.shape[0]):
 					CC[X[i], Y[i], Z[i]] = ecc(fixed, tformed[i])
@@ -438,7 +438,7 @@ class Img3D:
 			# # ax.set_ylabel('Y Label')
 			# # ax.set_zlabel('P Label')
 			# # plt.show()
-			self.save('TestImg3D.obj')
+			#self.save('TestImg3D.obj')
 
 	def rigid_reg(self, edgeID,netR):
 		(cc, warp_cv2, xytheta_TF, moved) = rigid_reg(self.edges[edgeID].node0, self.edges[edgeID].node1,netR)
@@ -1262,7 +1262,7 @@ def rigid_reg(fixed, moving,netR):
 	xytheta_TF = np.array([[-x, -y, theta]])
 	batch = np.zeros((1, 265, 257, 2))
 	batch[0, :, :, :] = np.stack((fixed, moving), axis=2)
-	moved, xytheta0, theta0, cost = netR.transform_batch(batch, xytheta_TF)
+	moved, cost = netR.transform_with_xytheta(batch, xytheta_TF)
 	node1_transformed = moved[0].squeeze()
 	cc = np.dot(node1_transformed.flatten(), fixed.flatten()) / np.linalg.norm(
 		node1_transformed.flatten()) / np.linalg.norm(fixed.flatten())

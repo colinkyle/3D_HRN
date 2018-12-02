@@ -14,7 +14,7 @@ import time
 fsys.cd('D:/__Atlas__/data/30890_/histology/segmented')
 
 # generate edge network
-if False:
+if True:
 	# Build neighbor distributions
 	IMG = Img3D(fsys.file('*.png'))
 	metaList = []
@@ -55,7 +55,7 @@ if False:
 	IMG.update_meta(metaList)
 	IMG.build_edge_net(1)
 	IMG.estimate_edge_distributions()
-	#save_obj(IMG, '30890_hist.obj')
+	save_obj(IMG, '30890_hist.obj')
 	print('Done!')
 #t1 = time.time()
 #print(t1-t0)
@@ -67,7 +67,7 @@ mri = MRI('_30890_.nii')
 fsys.cd('D:/__Atlas__/data/30890_/histology/segmented')
 IMG = load_obj('30890_hist.obj')
 # calculate histology to MRI
-if True:
+if False:
 	fsys.cd('D:/__Atlas__')
 	# call some function that:
 	# takes ranges for parameters
@@ -100,8 +100,8 @@ if True:
 	#   print(.6*np.mean(cost_cc) + .4*p_consistency)
 
 	print(score, param)
-t1 = time.time()
-print(t1-t0)
+#t1 = time.time()
+#print(t1-t0)
 
 if False:
 	z = 1.65  # -1.5#-0.5 #0
