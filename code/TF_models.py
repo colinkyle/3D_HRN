@@ -154,6 +154,10 @@ class RigidNet:
 
 				#### Cost,Optimizer train on similarity function (unsupervised) ####
 				self.cost_cc = ncc(fixed, self.tformed)
+				#self.stacked = tf.stack([tf.reshape(fixed,[-1,265*257,1,1]),tf.reshape(self.tformed,[-1,265*257,1,1])],axis=2)
+
+				#self.cost_mi = MutualInformation(self.stacked[:,0:5:-1,:,:])
+
 				self.cost_sq_er = tf.reduce_sum(tf.pow(tf.subtract(self.tformed, fixed), 2), name='RMS')
 
 				self.rmsprop_unsup = tf.train.RMSPropOptimizer(self.params['lr'], epsilon=self.params['rms_eps']).minimize(
@@ -182,10 +186,10 @@ class RigidNet:
 		 shape = (batch_size)
 		"""
 		feed_dict = {self.In: batch, self.keep_prob: .60}
-		_, cnt, cc = self.sess.run(
-			[self.rmsprop_unsup, self.global_step, self.cost_cc],
+		_, cnt, cc, moved = self.sess.run(
+			[self.rmsprop_unsup, self.global_step, self.cost_cc, self.tformed],
 			feed_dict=feed_dict)
-		return cnt, cc
+		return cnt, cc, moved
 
 	def train_supervised(self, batch, ideal_xytheta):
 		"""
@@ -564,6 +568,10 @@ class TpsNet:
 				self.weight_E_curl = tf.placeholder(tf.float32, shape=[1])
 				# squared intensity error
 				self.cost_se = tf.reduce_mean(tf.pow(tf.subtract(self.result[:, :, :, 1], self.In[:, :, :, 0]), 2))
+
+				stacked = tf.stack([tf.reshape(self.In[:, :, :, 0], [-1, 265 * 257, 1, 1]), tf.reshape(self.result[:, :, :, 1], [-1, 265 * 257, 1, 1])], axis=2)
+				#self.cost_mi = MutualInformation(stacked[:, 0:5:-1, :, :])/stacked.get_shape()[0]
+
 				# self.cost_e = tf.abs((tf.reduce_sum(self.Energy)/bat_size) - 1)
 				self.cost = self.weight_se * self.cost_se + \
 							self.weight_E_det_j * tf.reduce_mean(self.E_det_j) + \
@@ -1161,6 +1169,7 @@ def ncc(x, y):
 	stddev_y = tf.reduce_sum(tf.sqrt(
 		mean_y2 - tf.square(mean_y)), [1, 2, 3], keep_dims=True)
 	return tf.reduce_mean((x - mean_x) * (y - mean_y) / (stddev_x * stddev_y))
+
 
 # def batch_transformer(U, thetas, out_size, name='BatchSpatialTransformer'):
 # 	"""Batch Spatial Transformer Layer

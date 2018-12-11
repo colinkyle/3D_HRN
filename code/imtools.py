@@ -7,51 +7,25 @@ import math
 import nibabel as nib
 import numpy as np
 import pickle
-import pymc3 as pm
-from pymc3.distributions.dist_math import alltrue_elemwise
-# import pymp
 import SimpleITK as sitk
 from scipy import misc
-from scipy.interpolate import interpn, RegularGridInterpolator
+from scipy.interpolate import interpn
 from scipy import stats
 from TF_models import RigidNet, TpsNet
-import theano
-from theano.ifelse import ifelse
-from theano import tensor as T
 import tifffile
 import fsys
 import tensorflow as tf
 import tqdm
 import re
-# debug
-from theano.compile.nanguardmode import NanGuardMode
 
 
 # TODO
-# fix deepcopy on Img class
-# CSVs with imgname, position, resolution
-# deal with image background extraction
-# test background extraction
-# add cc to edge class
-
-
-# this decorator allows for lazy computations
-def lazy_property(fn):
-	'''Decorator that makes a property lazy-evaluated.
-	'''
-	attr_name = '_lazy_' + fn.__name__
-
-	@property
-	def _lazy_property(self):
-		if not hasattr(self, attr_name):
-			setattr(self, attr_name, fn(self))
-		return getattr(self, attr_name)
-
-	return _lazy_property
-
 
 # main image class
 class Img(np.ndarray):
+	"""
+	Data type for 2D histology section data
+	"""
 	def __new__(cls, *args, **kwargs):
 		meta = kwargs.pop('metadata', {})
 		new = np.ndarray.__new__(cls, *args, **kwargs)
@@ -84,12 +58,17 @@ class Img(np.ndarray):
 
 	@classmethod
 	def imread(cls, fpath, metadata=None):
+		"""
+		read image from disk, normalize intensities to [0,1], return as instance of Img
+		:param fpath: path to image file
+		:param metadata: optional metadata to associate with file
+		:return: instance of Img
+		"""
 		[path, name, ext] = fsys.file_parts(fpath)
 		if ext == '.tiff':
 			# read META data
 			with tifffile.TiffFile(fpath) as tif:
 				data = tif.asarray()
-				data[data == 255.0] = 0
 				data = data / 255.0
 				data = rgb2gray(data)
 				# image data from file overrides passed metadata
@@ -103,12 +82,17 @@ class Img(np.ndarray):
 			return cls.from_array(data, metadata)
 		elif ext == '.png':
 			data = misc.imread(fpath)
-			data[data == 255.0] = 0
 			data = data / 255.0
 			return cls.from_array(data, get_defaultMETA())
 
 	@classmethod
 	def from_array(cls, imgdat, metadata={}):
+		"""
+		create instance of Img from a matrix
+		:param imgdat: image data
+		:param metadata: optional metadata
+		:return: instance of Img
+		"""
 		if not metadata:
 			metadata = get_defaultMETA()
 		return cls(
@@ -118,10 +102,19 @@ class Img(np.ndarray):
 			metadata=metadata)
 
 	def imwrite(self, fpath):
+		"""
+		save image to disk as tiff
+		:param fpath: save path (must have tiff extension)
+		:return: none
+		"""
 		metadata = json.dumps(self.meta)
 		tifffile.imsave(fpath, self, description=metadata)
 
 	def view(self):
+		"""
+		view instance of Img
+		:return: matplotlib plot
+		"""
 		plt.imshow(np.ndarray(
 			shape=self.shape,
 			buffer=self.astype(np.float32),
@@ -129,70 +122,21 @@ class Img(np.ndarray):
 		plt.xticks([]), plt.yticks([])  # to hide tick values on X and Y axis
 		plt.show()
 
-	def compose_translation_3D(self, xyz):
-		affine = np.array([1, 0, 0, xyz[0]], [0, 1, 0, xyz[1]], [0, 0, 1, xyz[2]], [0, 0, 0, 1])
-		return np.dot(np.array(self.meta['MAT']), affine)
-
-	def compose_rotation_3D(self, theta_xyz):
-		affine_x = np.array([[1, 0, 0, 0], ...
-		[0, math.cos(math.radians(theta_xyz[0])), -1. * math.sin(math.radians(theta_xyz[0])), 0], ...
-							 [0, math.sin(math.radians(theta_xyz[0])), math.cos(math.radians(theta_xyz[0])), 0], ...
-							 [0, 0, 0, 1]])
-
-		affine_y = np.array([[math.cos(math.radians(theta_xyz[1])), 0, math.sin(math.radians(theta_xyz[1])), 0], ...
-		[0, 1, 0, 0], ...
-							 [-1. * math.sin(math.radians(theta_xyz[1])), 0, math.cos(math.radians(theta_xyz[1])), 0],
-							 ...
-							 [0, 0, 0, 1]])
-
-		affine_z = np.array(
-			[[math.cos(math.radians(theta_xyz[2])), -1. * math.sin(math.radians(theta_xyz[2])), 0, 0], ...
-			[math.sin(math.radians(theta_xyz[2])), math.cos(math.radians(theta_xyz[2])), 0, 0], ...
-			 [0, 0, 1, 0], ...
-			 [0, 0, 0, 1]])
-
-		affine = np.dot(np.dot(affine_x, affine_y), affine_z)
-		return np.dot(np.array(self.meta['MAT']), affine)
-
-	def compose_rigid_2D(self, xytheta):
-		# affine_og = self.get_affine_2D()
-		affine = np.array([[math.cos(math.radians(xytheta[2])), math.sin(math.radians(xytheta[2])), xytheta[0]],
-						   [-1.0 * math.sin(math.radians(xytheta[2])), math.cos(math.radians(xytheta[2])), xytheta[1]],
-						   [0, 0, 1]])
-
-		return affine  # np.dot(affine_og, np.dot(affine_rot, affine_trans))
-
-	def set_affine(self, MAT):
-		self.meta['MAT'] = MAT
-
-	def get_affine_2D(self):
-		affine = self.meta['MAT']
-		row1 = [affine[0][i] for i in [0, 1, 3]]
-		row2 = [affine[1][i] for i in [0, 1, 3]]
-		row3 = [0, 0, 1]
-		return np.array([row1, row2, row3])
-
-	@lazy_property
-	def p_intensity(self):
-		# Get all relatives
-		binCount, bins = np.histogram(self, bins=256, range=[machineEpsilon(np.float32), 1.])
-		binCount = binCount / max(binCount)
-		p_intensity = np.zeros(shape=self.shape[:2], dtype=np.float32)
-		l = bins[0]
-		ibin = 0
-		for h in bins[1:]:
-			p_intensity[np.logical_and(self >= l, self < h)] = binCount[ibin]
-			ibin += 1
-			l = h
-		p_intensity[self == h] = binCount[-1]
-		# p_intensity = p_intensity/np.max(p_intensity)
-		return p_intensity
-
-
 # defines relationship between images in terms of
 # probability distributions of relative positions
 class Edge:
+	"""
+	Edge class links 2 instances of Img with a probability distribution:
+	p(dx), p(dy), p(dtheta), these are image similarity as a function of
+	relative position between the images
+	"""
 	def __init__(self, img0, img1):
+		"""
+		set img0 as node0, img1 as node1, compute dz, and initialize
+		x, y, and theta distribution parameters
+		:param img0: instance of Img
+		:param img1: instance of Img
+		"""
 		if (not isinstance(img0, Img)) or (not isinstance(img1, Img)):
 			raise TypeError("Edge must reference two Img objects")
 		self.node0 = img0
@@ -200,32 +144,46 @@ class Edge:
 
 		self.dz = img1.meta['MAT0'][2][3] - img0.meta['MAT0'][2][3]
 
-		self.param_x = [-self.node1.shape[0] / 2, 0, self.node1.shape[0] / 2]
-		self.param_y = [0, 6]
-		self.param_theta = [0, 6]
+		self.param_x = [0, 6, 1] # position, scale, normalization factor
+		self.param_y = [0, 6, 1] # position, scale, normalization factor
+		self.param_theta = [0, 6, 1] # position, scale, normalization factor
 
 	def p_x(self, dx):
+		"""
+		return value of lapace distribution at dx, with params: param_x
+		:param dx: relative position between sections
+		:return: p(x) within [0,1]
+		"""
 		px = self.param_x[2]*stats.laplace.pdf(dx, loc=self.param_x[0], scale=self.param_x[1])
 		return px
 
 	def p_y(self, dy):
+		"""
+		return value of power-raised hypersecant distribution at dy, with params: param_y
+		power is raised to hardcoded 0.1 for underfit.
+		See Faliva and Zoia, 2017, Entropy  doi:10.3390/e19040149
+		:param dy: relative position between sections
+		:return: p(y) within [0,1]
+		"""
 		py = self.param_y[2]*np.power(stats.hypsecant.pdf(dy, loc=self.param_y[0], scale=self.param_y[1]), 0.1)
 		return py
 
 	def p_theta(self, dtheta):
+		"""
+		return value of power-raised hypersecant distribution at dtheta, with params: param_theta
+		power is raised to hardcoded 0.01 for an accurate fit.
+		See Faliva and Zoia, 2017, Entropy  doi:10.3390/e19040149
+		:param dtheta: relative angle between sections
+		:return: p(theta) within [0,1]
+		"""
 		ptheta = self.param_theta[2] * np.power(stats.hypsecant.pdf(dtheta, loc=self.param_theta[0], scale=self.param_theta[1]), 0.01)
 		return ptheta
 
-	def sample_xytheta(self, nsamples=500):
-		x = np.random.triangular(self.param_x[0], self.param_x[1], self.param_x[2], size=nsamples)
-
-		y = np.random.normal(self.param_y[0], self.param_y[1], size=nsamples)
-
-		theta = np.random.laplace(self.param_theta[0], self.param_theta[1], size=nsamples)
-
-		return [x, y, theta]
-
 	def view(self, img0=None, img1=None, img2=None):
+		"""
+		view pair of images in instance of Edge
+		:return: matplotlib plot
+		"""
 		if img0 is None:
 			img0 = self.node0
 		else:
@@ -259,11 +217,23 @@ class Edge:
 		plt.xticks([]), plt.yticks([])  # to hide tick values on X and Y axis
 		plt.show()
 
-
 # collection class
-class Img3D:
+class Stack:
+	"""
+	Stack is a container class that collects instances of Img,
+	their file names, and a dictionary of Edges callable with
+	tuple of image indices (i.e., Stack.edge[(0,1)]
+
+	Stack represents an entire image stack and the relationships
+	between neighboring images
+	"""
 	def __init__(self, fList=[], metaList=[]):
-		"""Img3D is container of Img objects, fnames, and edge dictionary"""
+		"""
+		Stack is container of Img objects, fnames, and edge dictionary
+		:param fList: list of filename strings, to be loaded into Stack
+		:param metaList: list of metadata for each Img
+		edge network is initialzed with edge net of immediate neighbors
+		"""
 		self.fList = fList
 		self.images = []
 		self.edges = {}
@@ -275,7 +245,14 @@ class Img3D:
 		if metaList:
 			self.update_meta(metaList)
 
+		self.build_edge_net(1)
+
 	def save(self, fname):
+		"""
+		saves as pickled object
+		:param fname: filename to save to
+		:return: none
+		"""
 		save_obj(self, fname)
 
 	def update_meta(self, metaList):
@@ -286,35 +263,34 @@ class Img3D:
 			raise ValueError('metaList must be same length as self.images')
 
 	def build_edge_net(self, n_neighbors):
+		"""
+		builds edge network but does not estimate
+		probability distributions between edges
+		:param n_neighbors: how many closest neighbors to build edges between
+		:return: updates edges attribute
+		"""
 		for i in range(len(self.images) - n_neighbors):
 			for j in np.arange(i + 1, i + n_neighbors + 1):
 				self.edges[(i, j)] = Edge(self.images[i], self.images[j])
 
-	def estimate_edge_distributions(self, nsamples=1000):
-
-		params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
-				  'save_file': 'regNETshallow',
-				  'save_interval': 1000,
-				  'batch_size': 90,
-				  'lr': .0001,  # Learning rate
-				  'rms_decay': 0.9,  # RMS Prop decay
-				  'rms_eps': 1e-8,  # RMS Prop epsilon
-				  'width': 265,
-				  'height': 257,
-				  'numParam': 3,
-				  'train': True}
-		netR = RigidNet(params)
+	def estimate_edge_distributions(self, net_params):
+		"""
+		Fits parameters for p(dx), p(dy), p(dtheta) between histology secions in Edge.
+		:param params: param dictionary to use to load TF_models.RigidNet
+		:return: update edge attribute with fitted distribution parameters
+		"""
+		netR = RigidNet(net_params)
 		# Loop edges
 
 		for edge_id, edge in self.edges.items():
 			print(edge_id)
-			# Search for best registration
+			# Search for best registration in cv2, warp with STN
 			(cc, warp_cv2, xytheta_TF, moved) = self.rigid_reg(edge_id,netR)
 
 			# tf.reset_default_graph()
 			# del netR
 
-			## alternate distribution method
+			## Compute empirical cc distribution within x,y,theta grid
 			fixed, moving = self.edges[edge_id].node0, self.edges[edge_id].node1
 			grid_size = 15
 			batch_size = 75
@@ -322,12 +298,13 @@ class Img3D:
 			cnt = 0
 			r = [30, 30, 10]
 			num = 31
+			#construct grid
 			for i in np.linspace(-r[0], r[0], grid_size):
 				for j in np.linspace(-r[1], r[1], grid_size):
 					for k in np.linspace(-r[2], r[2], grid_size):
 						Xform[cnt] = [i+xytheta_TF[0,0], j+xytheta_TF[0,1], k+xytheta_TF[0,2]]
 						cnt += 1
-
+			#batch of fixed movings with which to apply different xforms
 			batch = np.zeros((batch_size, 265, 257, 2))
 			for i in range(batch_size):
 				batch[i] = np.stack((fixed, moving), axis=2)
@@ -337,17 +314,20 @@ class Img3D:
 			y = y.flatten()
 			x = x.flatten()
 			z = z.flatten()
-
+			#loop until all x,y,theta combos have been completed
 			for b in range(int((grid_size**3)/batch_size)):
-				#print(Xform[b * 80:b * 80 + 80])
+				#apply next subgrid of transforms
 				tformed, cost_cc = netR.transform_with_xytheta(batch, Xform[b * batch_size:b * batch_size + batch_size])
 				X, Y, Z = x[b * batch_size:b * batch_size + batch_size], y[b * batch_size:b * batch_size + batch_size], z[b * batch_size:b * batch_size + batch_size]
+				# record cc values
 				for i in range(tformed.shape[0]):
 					CC[X[i], Y[i], Z[i]] = ecc(fixed, tformed[i])
 
+			#reduce grid to marginal max values
 			dist_x = np.max(np.max(CC, axis=2, keepdims=True), axis=1, keepdims=True).flatten()
 			dist_y = np.max(np.max(CC, axis=2, keepdims=True), axis=0, keepdims=True).flatten()
 			dist_theta = np.max(np.max(CC, axis=1, keepdims=True), axis=0, keepdims=True).flatten()
+			# add best cc found by cv2
 			dist_x = np.concatenate((dist_x, [cc]), axis=0)
 			dist_y = np.concatenate((dist_y, [cc]), axis=0)
 			dist_theta = np.concatenate((dist_theta, [cc]), axis=0)
@@ -355,9 +335,14 @@ class Img3D:
 			x = np.linspace(-r[0], r[0], grid_size)
 			y = np.linspace(-r[1], r[1], grid_size)
 			z = np.linspace(-r[2], r[2], grid_size)
+
+			# add location of best cc found by cv2
 			x = np.concatenate([x, [0]], axis=0)
 			y = np.concatenate([y, [0]], axis=0)
 			z = np.concatenate([z, [0]], axis=0)
+			# add location of best registration in case not found in grid
+			#shift values so they are relative to no-transformed images
+			# rather than being relative to pre-registered moving image
 			x+=xytheta_TF[0,0]
 			y+=xytheta_TF[0,1]
 			z+=xytheta_TF[0,2]
@@ -374,105 +359,70 @@ class Img3D:
 			y = y[reord]
 			dist_y = dist_y[reord]
 
+			#finally fit and update edge distribution parameters
 			edge.param_x = fit_laplace(x, dist_x)
 			edge.param_y = fit_pr_hypsecant(y, dist_y, .1)
 			edge.param_theta = fit_pr_hypsecant(z, dist_theta, .01)
 
-			#plotting
-			#dist_x_hat = stats.laplace.pdf(x, loc=u_x, scale=s_x)
-			#dist_x_hat = np.max(dist_x) * dist_x_hat / np.max(dist_x_hat)
-			#
-			#dist_y_hat = np.power(stats.hypsecant.pdf(y, loc=u_y, scale=s_y), .1)
-			#dist_y_hat = np.max(dist_y) * dist_y_hat / np.max(dist_y_hat)
-			#
-			#dist_z_hat = np.power(stats.hypsecant.pdf(z, loc=u_z, scale=s_z), .01)
-			#dist_z_hat = np.max(dist_theta) * dist_z_hat / np.max(dist_z_hat)
-			#
-			#plt.plot(x,dist_x)
-			#plt.plot(x,dist_x_hat)
-			#plt.show()
-			#
-			#plt.plot(y, dist_y)
-			#plt.plot(y, dist_y_hat)
-			#plt.show()
-			#
-			#plt.plot(z, dist_theta)
-			#plt.plot(z, dist_z_hat)
-			#plt.show()
-
-
-
-			# dy,dx,dtheta = warp[0][2],warp[1][2],np.arcsin(warp[0][1])*180/np.pi
-			# print('max: ', dx,dy,dtheta,'cc: ',cc)
-			#
-			# # Generate to model full distribution around rigid warp parameters
-			# X,Y,Theta = edge.sample_xytheta(nsamples=nsamples)
-			# p_xytheta = np.zeros((nsamples,))
-			# #with pymp.Parallel(4) as p:
-			# for index in range(nsamples):
-			#   transMAT = edge.node1.compose_rigid_2D([Y[index], X[index], Theta[index]])
-			#   rows, cols = edge.node1.shape
-			#   node1_transformed = cv2.warpAffine(edge.node1.p_intensity, transMAT[0:2, :], (cols, rows))
-			#   p_xytheta[index] = ecc(node1_transformed, self.edges[edge_id].node0.p_intensity)
-			#
-			# # clean up in case nan
-			# X = X[np.isfinite(p_xytheta)]
-			# Y = Y[np.isfinite(p_xytheta)]
-			# Theta = Theta[np.isfinite(p_xytheta)]
-			# p_xytheta = p_xytheta[np.isfinite(p_xytheta)]
-			#
-			# # Model distribution
-			# X1 = np.array(X, dtype=theano.config.floatX)
-			# Y1 = np.array(Y, dtype=theano.config.floatX)
-			# Theta1 = np.array(Theta, dtype=theano.config.floatX)
-			#
-			# Error = model_tgl([X1,Y1,Theta1],p_xytheta,[dx,dy,dtheta],cc,edge)
-			# print('Error',Error)
-			#
-			# # Yhat = tpdf(X1,edge.param_x[0],edge.param_x[1],edge.param_x[2]).eval()*tpdf(Y1,edge.param_y[0],edge.param_y[1],edge.param_y[2]).eval() * lpdf(Theta1,edge.param_theta[0],edge.param_theta[1]).eval()
-			# # fig = plt.figure()
-			# # ax = fig.add_subplot(111, projection='3d')
-			# # ax.scatter(X, Y, p_xytheta)
-			# # ax.scatter(X, Y, Yhat,c='r')
-			# # ax.set_xlabel('X Label')
-			# # ax.set_ylabel('Y Label')
-			# # ax.set_zlabel('P Label')
-			# # plt.show()
-			#self.save('TestImg3D.obj')
-
 	def rigid_reg(self, edgeID,netR):
+		"""
+		performs rigid registration in CV2 in case network
+		wont find best params
+		:param edgeID: tuple that IDs edge
+		:param netR: rigid network to transform images with
+		:return:
+		cc: max similarity found
+		warp_cv2: cv2 warp params (corner centered)
+		xytheta_TF: network warp params (middle centered)
+		moved: resampled moving image
+		"""
 		(cc, warp_cv2, xytheta_TF, moved) = rigid_reg(self.edges[edgeID].node0, self.edges[edgeID].node1,netR)
 		return (cc, warp_cv2, xytheta_TF, moved)
 
 	def score_param_consistency(self, xytheta):
-		half_width = self.images[0].shape[1] / 2.
-		half_height = self.images[0].shape[0] / 2.
+		"""
+		calculates probability of stack warps to template given
+		stack-wize image similarity structure
+		:param xytheta: list of transforms each image in stack -> template
+		:return: p(template_position|xytheta,stack)
+		"""
 		total_err = 0
+		#loop edges
 		for pair in self.edges.keys():
-			# convert center rotated to origin rotated
+			# center rotated warps from origin to template
 			warp1 = affine2d_from_xytheta(xytheta[pair[0]])  # img1 warp
 			warp2 = affine2d_from_xytheta(xytheta[pair[1]])  # img2 warp
 
-			# calculate img1 -> img0
+			# calculate img1 -> img0 relative positions of
+			# neighbors after warping to template
 			warp3 = np.dot(warp1, np.linalg.inv(warp2))
-			_, _, mri_tz, mri_x, mri_y, _ = affine_get_params(affine_2d_to_3d(warp3))
+			_, _, d_tz, d_x, d_y, _ = affine_get_params(affine_2d_to_3d(warp3))
 
 			# get probabilities from edge distributions
-			p_x = self.edges[pair].p_x(mri_x)
-			p_y = self.edges[pair].p_y(mri_y)
-			p_theta = self.edges[pair].p_theta(mri_tz)
+			p_x = self.edges[pair].p_x(d_x)
+			p_y = self.edges[pair].p_y(d_y)
+			p_theta = self.edges[pair].p_theta(d_tz)
 			# cost function
-			p_edge = p_x * p_y * p_theta * (1 - .05 ** np.diff(pair))
+			p_edge = p_x * p_y * p_theta# * (1 - .05 ** np.diff(pair))
 
 			if not np.isnan(p_edge):
 				total_err += np.log(p_edge)
 		return np.exp(total_err / len(self.edges.keys()))
 
-	def set_warped_from_tformed(self,tformed,xytheta=None,splines=None):
-		if len(self.images) != tformed.shape[0]:
+	def set_warped_from_moved(self,moved,xytheta=None,splines=None):
+		"""
+		Function sets Img.warped (convenient to store Original and
+		Warped image together sometimes)
+		:param moved: resampled moving images
+		:param xytheta: params to store (convert original to resampled)
+		:param splines: params to store (convert rigid resampled to final resampled)
+		:return:
+		updates Img attributes
+		"""
+		if len(self.images) != moved.shape[0]:
 			raise ValueError('tformed.shape[0] must be same length as self.images')
 		for i in range(len(self.images)):
-			self.images[i].warped = tformed[i].squeeze()
+			self.images[i].warped = moved[i].squeeze()
 		if xytheta is not None:
 			for i in range(len(self.images)):
 				self.images[i].xytheta = xytheta[i]
@@ -480,10 +430,13 @@ class Img3D:
 			for i in range(len(self.images)):
 				self.images[i].splines = splines[i]
 
-	def get_mri_from_warped(self):
+	def get_nifti3D_from_warped_stack(self):
+		"""
+		returns a 3D nifti object from a warped stack
+		"""
 		locs = [int(re.search('[0-9]*[N]', self.fList[i]).group(0)[0:-1]) for i in range(len(self.fList)) if
 				re.search('[0-9]*[N]', self.fList[i])]
-		z_middle = (max(locs) + min(locs)) / 2.
+		#z_middle = (max(locs) + min(locs)) / 2.
 
 		z_all = np.arange(min(locs), max(locs), 1)
 		z_arg = np.empty(z_all.shape)
@@ -503,85 +456,27 @@ class Img3D:
 		affine[2, 3] = -affine[2, 2] * ((max(locs) - min(locs)) / 2.)
 		return nib.Nifti1Image(hist_data, affine)
 
-
-class MRI:
-
+class Template:
+	"""
+	MRI container class for the 3D template image
+	"""
 	def __init__(self, fname):
-
+		"""
+		loads data and metadata of MRI image
+		:param fname: filename of MRI image
+		"""
 		self.affine = nib.load(fname).affine
 		self.data = nib.load(fname).get_data()
 		self.data = self.data / max(self.data.flatten())
 
-	@lazy_property
-	def p_intensity(self):
-		# Get all relatives
-		binCount, bins = np.histogram(self.data, bins=256, range=[machineEpsilon(np.float32), 1.])
-		binCount = binCount / max(binCount)
-		p_intensity = np.zeros(shape=self.data.shape, dtype=np.float32)
-		l = bins[0]
-		ibin = 0
-		for h in bins[1:]:
-			p_intensity[np.logical_and(self.data >= l, self.data < h)] = binCount[ibin]
-			ibin += 1
-			l = h
-		p_intensity[self.data == h] = binCount[-1]
-		# p_intensity = p_intensity/np.max(p_intensity)
-		return p_intensity
-
-	def reg_to_slice(self, IMG, dz=0, theta_x=0, theta_y=0):
-		warpCoef = []
-		warpList = []
-		# per section
-		# with pymp.Parallel(4) as p:
-		for i, img in enumerate(IMG.images):
-			# x,y,z MRI
-			x_mri = np.array([self.affine[0][0] * x + self.affine[0][3] for x in range(self.data.shape[0])])
-			y_mri = np.array([self.affine[1][1] * y + self.affine[1][3] for y in range(self.data.shape[1])])
-			z_mri = np.array([self.affine[2][2] * z + self.affine[2][3] for z in range(self.data.shape[2])])
-
-			# scale and position of histology
-			x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
-			y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
-			z = img.meta['MAT'][2][3] + dz
-			XX, YY = np.atleast_2d(x, y)
-			YY = YY.T
-
-			# calculate rotation matrices
-			affine_x = np.array([[1, 0, 0, 0],
-								 [0, math.cos(math.radians(theta_x)), -1. * math.sin(math.radians(theta_x)), 0],
-								 [0, math.sin(math.radians(theta_x)), math.cos(math.radians(theta_x)), 0],
-								 [0, 0, 0, 1]])
-
-			affine_y = np.array([[math.cos(math.radians(theta_y)), 0, math.sin(math.radians(theta_y)), 0],
-								 [0, 1, 0, 0],
-								 [-1. * math.sin(math.radians(theta_y)), 0, math.cos(math.radians(theta_y)), 0],
-								 [0, 0, 0, 1]])
-			MAT = np.dot(affine_x, affine_y)
-
-			# transform sample points
-			XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
-			YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
-			ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
-
-			# interpolate results
-			mri = interpn((x_mri, y_mri, z_mri), self.p_intensity, np.array([XXX, YYY, ZZZ]).T, bounds_error=False,
-						  fill_value=0)
-			(cc, warp) = rigid_reg(mri.astype(np.float32), img.p_intensity)
-			warpList.append(warp)
-			warpCoef.append(cc)
-			dy, dx, dtheta = warp[0][2], warp[1][2], np.arcsin(warp[0][1]) * 180 / np.pi
-			print('max: ', dx, dy, dtheta, 'cc: ', cc)
-
-		return (warpList, warpCoef)
-
-	def retrain_TF(self, net, big_batch, ntrain=500, nbatch=10):
+	def retrain_TF(self, net, big_batch, ntrain=100, nbatch=10):
 		print('\nretraining model...')
 		## estimate transformations
 		for _ in tqdm.tqdm(range(ntrain)):
 			batch = big_batch[np.random.choice(range(big_batch.shape[0]), nbatch), :, :, :]
-			cnt, cost, out, cost_t, _ = net.train(batch, np.zeros((nbatch, 3)))
+			cnt, cost, moved = net.train_unsupervised(batch)
 
-			# print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
+			#print('count: {}, cost: {}, sanity: {}'.format(cnt, cost,np.mean(np.abs(moved))))
 		return net
 
 	def retrain_TF_E(self, net, big_batch, ntrain=500, nbatch=10):
@@ -594,142 +489,19 @@ class MRI:
 			# print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
 		return net
 
-	# helper functions
-
 	def retrain_TF_Both(self, netR, netE, big_batch, ntrain=500, nbatch=10):
 		print('\nretraining model...')
 		## estimate transformations
 		for _ in tqdm.tqdm(range(ntrain)):
 			batch = big_batch[np.random.choice(range(big_batch.shape[0]), nbatch), :, :, :]
-			cnt, cost, out, cost_t, tformed = netR.train(batch, np.zeros((nbatch, 3)))
+			cnt, cost, moved = netR.train_unsupervised(batch)
+			#print('count_R: {}, cost_mi: {}'.format(cnt, cost))
 			for i in range(nbatch):
-				batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
+				batch[i, :, :, 1] = np.squeeze(moved[i, :, :])
 			cnt, cost, cost_cc, E_det_j, E_div, E_curl = netE.train(batch)
 
-			# print('count: {}, cost_cc: {}, sanity: {}'.format(cnt, cost_t, np.mean(np.abs(out), axis=0)))
+			#print('count_E: {}, cost_mi: {}'.format(cnt, cost))
 		return netR, netE
-
-	# helper functions
-
-	# def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res):
-	#   # variables
-	#   nspacing = 5
-	#   nbatch = nspacing**5
-	#   n_each_param = 1
-	#   ntrain = [5000, 500, 200, 200]
-	#   ## load net
-	#   print('loading models...')
-	#   # go to training dir
-	#   fsys.cd('D:/Dropbox/__Atlas__')
-	#   params = {'load_file': 'D:/__Atlas__/model_saves/model-regNETshallow_257x265_507000',
-	#             'save_file': 'regNETshallow',
-	#             'save_interval': 1000,
-	#             'batch_size': 32,
-	#             'lr': .0001,  # Learning rate
-	#             'rms_decay': 0.9,  # RMS Prop decay
-	#             'rms_eps': 1e-8,  # RMS Prop epsilon
-	#             'width': 265,
-	#             'height': 257,
-	#             'numParam': 3,
-	#             'train': True}
-	#   netR = AtlasNet(params)
-	#   params['load_file'] = 'D:/__Atlas__/model_saves/model-Elastic2_257x265_1000'
-	#   params['save_file'] = 'Elastic2'
-	#   netE = ElasticNet(params)
-	#
-	#   param_dist = []
-	#   max_score = 0
-	#   max_param = [0, 0, 0]
-	#   #loop parameter resolution
-	#   for res in range(4):
-	#     ## gen training batch
-	#     print('\ngenerating training batch...')
-	#
-	#     z_vals = []#np.random.randint(zlim[0],zlim[1],nbatch)
-	#     theta_x_vals = []
-	#     theta_y_vals = []
-	#     dxy_vals = []
-	#     dz_vals = []
-	#     zs = np.linspace(zlim[0],zlim[1], nspacing)
-	#     txs = np.linspace(theta_xlim[0], theta_xlim[1], nspacing)
-	#     tys = np.linspace(theta_ylim[0], theta_ylim[1], nspacing)
-	#     dxys = np.linspace(xy_res[0], xy_res[1], nspacing)
-	#     dzs = np.linspace(z_res[0], z_res[1], nspacing)
-	#
-	#     for z in zs:
-	#       for tx in txs:
-	#         for ty in tys:
-	#           for dxy in dxys:
-	#             for dz in dzs:
-	#               z_vals.append(z)
-	#               theta_x_vals.append(tx)
-	#               theta_y_vals.append(ty)
-	#               dxy_vals.append(dxy)
-	#               dz_vals.append(dz)
-	#
-	#
-	#     big_batch = np.zeros(shape=(n_each_param*nbatch,params['width'],params['height'],2),dtype=np.float32)
-	#
-	#     pos = (0,n_each_param)
-	#     for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
-	#       big_batch[pos[0]:pos[1],:,:,:] = self.gen_batch(IMG,z,tx,ty,dxy,dz,subsample=True,n_subsample=n_each_param)#[np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
-	#       pos = (pos[0]+n_each_param,pos[1]+n_each_param)
-	#
-	#     # retrain networks
-	#     if ntrain[res]>0:
-	#       netR,netE = self.retrain_TF_Both(netR,netE,big_batch,ntrain=ntrain[res],nbatch=32)
-	#
-	#     ## compute fits
-	#     print('\ncomputing parameter scores...')
-	#     score = np.zeros(shape=(nbatch,))
-	#     pos = 0
-	#     for z,tx,ty,dxy,dz in tqdm.tqdm(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals)):
-	#       batch = self.gen_batch(IMG,z,tx,ty,dxy,dz)
-	#       #run rigid
-	#       tformed, xytheta, _ = netR.run_batch(batch)
-	#       for i in range(tformed.shape[0]):
-	#         batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
-	#
-	#       #run elastic
-	#       tformed, theta, cost_cc, cost = netE.run_batch(batch)
-	#       # compute global cost function
-	#       p_consistency = IMG.score_param_consistency(xytheta)
-	#       score[pos] = .4*np.mean(cost_cc) + .6*p_consistency - cost
-	#       pos+=1
-	#
-	#     ## update parameter ranges
-	#     param_dist.append(zip(z_vals,theta_x_vals,theta_y_vals,dxy_vals,dz_vals,score))
-	#     plt.figure()
-	#     n,bins,_ = plt.hist(score)
-	#     plt.show()
-	#     max_id = np.argmax(score)
-	#     print('\nmax score:',np.max(score), 'pos:',z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id])
-	#
-	#     if np.max(score)> max_score:
-	#       max_score = np.max(score)
-	#       max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id], dz_vals[max_id]]
-	#       #update z
-	#       z_span = np.asscalar(np.diff(zlim))/4.
-	#       zlim = [z_vals[max_id] - z_span, z_vals[max_id] + z_span]
-	#       # update theta x
-	#       tx_span = np.asscalar(np.diff(theta_xlim)) / 4.
-	#       theta_xlim = [theta_x_vals[max_id] - tx_span, theta_x_vals[max_id] + tx_span]
-	#       # update theta y
-	#       ty_span = np.asscalar(np.diff(theta_ylim)) / 4.
-	#       theta_ylim = [theta_y_vals[max_id] - ty_span, theta_y_vals[max_id] + ty_span]
-	#
-	#       # update dxy
-	#       dxy_span = np.asscalar(np.diff(xy_res)) / 4.
-	#       xy_res = [dxy_vals[max_id] - dxy_span, dxy_vals[max_id] + dxy_span]
-	#
-	#       # update dz
-	#       dz_span = np.asscalar(np.diff(z_res)) / 4.
-	#       z_res = [dz_vals[max_id] - dz_span, dz_vals[max_id] + dz_span]
-	#
-	#   ## close net
-	#   tf.reset_default_graph()
-	#   del netR, netE
-	#   return max_score,max_param,param_dist
 
 	def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res):
 		# variables
@@ -857,6 +629,19 @@ class MRI:
 		return max_score, max_param, param_dist
 
 	def gen_batch(self, IMG, z_loc, theta_x, theta_y, dxy, dz, subsample=False, n_subsample=0):
+		"""
+		Generates a batch of template-section,histology pairs for use with STN
+		:param IMG: Stack histology stack
+		:param z_loc: z transform to template
+		:param theta_x: theta_x transform to template
+		:param theta_y: theta_y transform to template
+		:param dxy: xy scaling transform to template
+		:param dz: z scaling transform to template
+		:param subsample: whether or not to subsample for training batch at many transform params
+		:param n_subsample: how many subsamples to return
+		:return: batch matrix shape: (len(Stack)-or-n_subsample, 265, 257, 2)
+		"""
+		#generate affine fore resampling MRI at theta_x, theta_y, dxy, dz, and z locations of each section
 		# set xyz resolution
 		mri_affine = copy.deepcopy(self.affine)
 		mri_affine[:2, :] = dxy * mri_affine[:2, :]
@@ -866,11 +651,12 @@ class MRI:
 		y_mri = np.array([mri_affine[1][1] * y + mri_affine[1][3] for y in range(self.data.shape[1])])
 		z_mri = np.array([mri_affine[2][2] * z + mri_affine[2][3] for z in range(self.data.shape[2])])
 
+		#theta_x rotation
 		affine_x = np.array([[1, 0, 0, 0],
 							 [0, math.cos(math.radians(theta_x)), -1. * math.sin(math.radians(theta_x)), 0],
 							 [0, math.sin(math.radians(theta_x)), math.cos(math.radians(theta_x)), 0],
 							 [0, 0, 0, 1]])
-
+		#theta y rotation
 		affine_y = np.array([[math.cos(math.radians(theta_y)), 0, math.sin(math.radians(theta_y)), 0],
 							 [0, 1, 0, 0],
 							 [-1. * math.sin(math.radians(theta_y)), 0, math.cos(math.radians(theta_y)), 0],
@@ -882,13 +668,15 @@ class MRI:
 			samples = np.random.randint(0, len(IMG.images), n_subsample)
 			for i, samp in enumerate(samples):
 				# Match img to mri
+				# pixel locations x,y,z of each section
 				img = IMG.images[samp]
 				x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
 				y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
+				# add z shift
 				z = img.meta['MAT'][2][3] + z_loc
 				XX, YY = np.atleast_2d(x, y)
 				YY = YY.T
-
+				# warp according to MRI warp params
 				XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
 				YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
 				ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
@@ -896,6 +684,7 @@ class MRI:
 				#             fill_value=0)
 				# mri = Img.from_array(
 				#     interp_func(np.array([XXX, YYY, ZZZ]).T))
+				# resample intensities at section locations
 				mri = Img.from_array(
 					interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T, bounds_error=False,
 							fill_value=0))
@@ -913,18 +702,24 @@ class MRI:
 		# per section
 		batch = np.zeros(shape=(len(IMG.images), IMG.images[0].shape[0], IMG.images[0].shape[1], 2))
 		for i, img in enumerate(IMG.images):
+			# Match img to mri
+			# pixel locations x,y,z of each section
 			x = np.array([img.meta['MAT'][0][0] * x + img.meta['MAT'][0][3] for x in range(img.shape[0])])
 			y = np.array([img.meta['MAT'][1][1] * y + img.meta['MAT'][1][3] for y in range(img.shape[1])])
+			# add z shift
 			z = img.meta['MAT'][2][3] + z_loc
 			XX, YY = np.atleast_2d(x, y)
 			YY = YY.T
-
+			# warp according to MRI warp params
 			XXX = MAT[0][0] * XX + MAT[0][1] * YY + MAT[0][2] * z + MAT[0][3]
 			YYY = MAT[1][0] * XX + MAT[1][1] * YY + MAT[1][2] * z + MAT[1][3]
 			ZZZ = MAT[2][0] * XX + MAT[2][1] * YY + MAT[2][2] * z + MAT[2][3]
+			# interpolate resampled template intensities
 			mri = Img.from_array(
 				interpn((x_mri, y_mri, z_mri), self.data, np.array([XXX, YYY, ZZZ]).T,
 						bounds_error=False, fill_value=0))
+
+			# histogram matching of intensities
 			matcher = sitk.HistogramMatchingImageFilter()
 			matcher.SetNumberOfHistogramLevels(512)
 			matcher.SetNumberOfMatchPoints(30)
@@ -934,7 +729,10 @@ class MRI:
 			batch[i, :, :, :] = cv2.merge((mri, img))
 		return batch
 
-	def get_resampled_mri(self, IMG, z_loc, theta_x, theta_y, dxy, dz):
+	def get_nifti3D_from_warped_template(self, IMG, z_loc, theta_x, theta_y, dxy, dz):
+		"""
+		returns a 3D nifti object of warped template image
+		"""
 		mri_affine = copy.deepcopy(self.affine)
 		mri_affine[:2, :] = dxy * mri_affine[:2, :]
 		mri_affine[2, :] = dz * mri_affine[2, :]
@@ -991,17 +789,6 @@ class MRI:
 		# new_affine
 		return nib.Nifti1Image(new_mri, affine)
 
-
-
-# for p_intensity to ignore zero/background
-def machineEpsilon(func=float):
-	machine_epsilon = func(1)
-	while func(1) + func(machine_epsilon) != func(1):
-		machine_epsilon_last = machine_epsilon
-		machine_epsilon = func(machine_epsilon) / func(2)
-	return machine_epsilon_last
-
-
 # only handle grayscale images
 def rgb2gray(rgb):
 	if len(rgb.shape) > 2:
@@ -1011,226 +798,21 @@ def rgb2gray(rgb):
 	else:
 		return rgb
 
-
 def get_defaultMETA():
 	affine = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 	meta = {'MAT0': affine, 'MAT': copy.deepcopy(affine), 'fname': None, 'parent': None, 'Children': {}}
 	return meta
 
-
-# theano distributions
-def tpdf(value, lower, c, upper):
-	# return ifelse(T.gt(T.concatenate([T.gt(lower,c), T.lt(upper,c), T.gt(lower,upper)]).sum(),0),T.zeros_like(value),T.switch(alltrue_elemwise([lower <= value, value < c]),
-	#                 ((value - lower) / ((c - lower))),
-	#                 T.switch(T.eq(value, c), (1),
-	#                 T.switch(alltrue_elemwise([c < value, value <= upper]),
-	#                 ((upper - value) / ((upper - c))), 0))))
-
-	return T.switch(alltrue_elemwise([lower <= value, value < c]),
-					((value - lower) / ((c - lower) + np.array(1e-32, dtype=theano.config.floatX))),
-					T.switch(T.eq(value, c), (1),
-							 T.switch(alltrue_elemwise([c < value, value <= upper]),
-									  ((upper - value) / ((upper - c) + np.array(1e-32, dtype=theano.config.floatX))),
-									  0)))
-
-
-def gpdf(sample, location, scale):
-	divisor = 2 * scale ** 2
-	exp_arg = -((sample - location) ** 2) / divisor
-	return T.exp(exp_arg)
-
-
-def lpdf(sample, location, scale):
-	divisor = 2 * scale  # + epsilon,
-	exp_arg = -T.abs_(sample - location) / divisor
-	return T.exp(exp_arg)
-
-
-# similarity function
 def ecc(img0, img1):
 	return np.dot(img0.flatten(), img1.flatten()) / np.linalg.norm(img0.flatten()) / np.linalg.norm(img1.flatten())
 
-
-# pymc models
-def model_ttl(locations, samples, centers, cc, edge):
-	basic_model = pm.Model()
-
-	with basic_model:
-		# Priors for unknown model parameters
-		l1 = pm.Normal('l1', mu=edge.param_x[0], sd=edge.node0.shape[0] / 85)
-		m1 = centers[0]
-		u1 = pm.Normal('u1', mu=edge.param_x[2], sd=edge.node0.shape[0] / 85)
-
-		l2 = pm.Normal('l2', mu=edge.param_y[0], sd=edge.node0.shape[1] / 85)
-		m2 = centers[1]
-		u2 = pm.Normal('u2', mu=edge.param_y[2], sd=edge.node0.shape[1] / 85)
-
-		m3 = centers[2]
-		s3 = pm.HalfNormal('s3', sd=20)
-
-		p_x = tpdf(locations[0], l1, m1, u1)
-		p_y = tpdf(locations[1], l2, m2, u2)
-		p_theta = lpdf(locations[2], m3, s3)
-
-		sigma = pm.HalfNormal('sigma', sd=1)
-
-		# Expected value of outcome
-		mu = cc * p_x * p_y * p_theta
-
-		# Likelihood (sampling distribution) of observations
-		Y_obs = pm.Normal('Y_obs', mu=mu, sd=sigma, observed=samples)
-		trace = pm.sample(2000, njobs=1, step=pm.Metropolis())
-
-	pm.summary(trace)
-	# values
-	L1 = np.mean(trace['l1'])
-	M1 = centers[0]
-	U1 = np.mean(trace['u1'])
-
-	L2 = np.mean(trace['l2'])
-	M2 = centers[1]
-	U2 = np.mean(trace['u2'])
-
-	M3 = centers[2]
-	S3 = np.mean(trace['s3'])
-
-	p_x = tpdf(locations[0], L1, M1, U1).eval()
-	p_y = tpdf(locations[1], L2, M2, U2).eval()
-	p_theta = lpdf(locations[2], M3, S3).eval()
-	mu = cc * p_x * p_y * p_theta
-	Err = np.sum((samples - mu) ** 2)
-	# print(Err)
-
-	edge.param_x = [L1, M1, U1]
-	edge.param_y = [L2, M2, U2]
-	edge.param_theta = [M3, S3]
-	return Err
-
-
-def model_ggl(locations, samples, centers, cc):
-	basic_model = pm.Model()
-	with basic_model:
-		# Priors for unknown model parameters
-		s1 = pm.HalfNormal('s1', sd=20)
-		m1 = centers[0]
-
-		s2 = pm.Normal('s2', sd=20)
-		m2 = centers[1]
-
-		m3 = centers[2]
-		s3 = pm.HalfNormal('s3', sd=20)
-
-		p_x = gpdf(locations[0], m1, s1)
-		p_y = gpdf(locations[1], m2, s2)
-		p_theta = lpdf(locations[2], m3, s3)
-
-		sigma = pm.HalfNormal('sigma', sd=1)
-
-		# Expected value of outcome
-		mu = cc * p_x * p_y * p_theta
-
-		# Likelihood (sampling distribution) of observations
-		Y_obs = pm.Normal('Y_obs', mu=mu, sd=sigma, observed=samples)
-		trace = pm.sample(5000, njobs=4)
-
-	pm.summary(trace)
-	# values
-	S1 = np.mean(trace['s1'])
-	M1 = centers[0]
-
-	S2 = np.mean(trace['s2'])
-	M2 = centers[1]
-
-	M3 = centers[2]
-	S3 = np.mean(trace['s3'])
-
-	p_x = gpdf(locations[0], M1, S1).eval()
-	p_y = gpdf(locations[1], M2, S2).eval()
-	p_theta = lpdf(locations[2], M3, S3).eval()
-	mu = cc * p_x * p_y * p_theta
-	Err = np.sum((samples - mu) ** 2)
-	print(Err)
-
-	# import matplotlib.pyplot as plt
-	# from mpl_toolkits.mplot3d import Axes3D
-	# fig = plt.figure()
-	# ax = fig.add_subplot(111, projection='3d')
-	#
-	# ax.scatter(locations[0], locations[1], zs=samples)
-	# ax.scatter(locations[0], locations[1], zs=mu, c='r')
-	# ax.azim = 0
-	# ax.elev = 0
-	# ax.set_xlabel('X')
-	# ax.set_ylabel('Y')
-	# ax.set_zlabel('P')
-	# plt.show()
-	#
-	# exit()
-
-
-def model_tgl(locations, samples, centers, cc, edge):
-	basic_model = pm.Model()
-
-	with basic_model:
-		# Priors for unknown model parameters
-		l1 = pm.Normal('l1', mu=edge.param_x[0], sd=edge.node0.shape[0] / 85)
-		m1 = centers[0]
-		u1 = pm.Normal('u1', mu=edge.param_x[2], sd=edge.node0.shape[0] / 85)
-
-		s2 = pm.Normal('s2', sd=20)
-		m2 = centers[1]
-
-		m3 = centers[2]
-		s3 = pm.HalfNormal('s3', sd=20)
-
-		p_x = tpdf(locations[0], l1, m1, u1)
-		p_y = gpdf(locations[1], m2, s2)
-		p_theta = lpdf(locations[2], m3, s3)
-
-		sigma = pm.HalfNormal('sigma', sd=1)
-
-		# Expected value of outcome
-		mu = cc * p_x * p_y * p_theta
-
-		# Likelihood (sampling distribution) of observations
-		Y_obs = pm.Normal('Y_obs', mu=mu, sd=sigma, observed=samples)
-		trace = pm.sample(2000, njobs=1, step=pm.Metropolis())
-
-	pm.summary(trace)
-	# values
-	L1 = np.mean(trace['l1'])
-	M1 = centers[0]
-	U1 = np.mean(trace['u1'])
-
-	M2 = centers[1]
-	S2 = np.mean(trace['s2'])
-
-	M3 = centers[2]
-	S3 = np.mean(trace['s3'])
-
-	p_x = tpdf(locations[0], L1, M1, U1).eval()
-	p_y = gpdf(locations[1], M2, S2).eval()
-	p_theta = lpdf(locations[2], M3, S3).eval()
-	mu = cc * p_x * p_y * p_theta
-	Err = np.sum((samples - mu) ** 2)
-	# print(Err)
-
-	edge.param_x = [L1, M1, U1]
-	edge.param_y = [M2, S2]
-	edge.param_theta = [M3, S3]
-	return Err
-
-
-# object save functions
 def save_obj(var, fname):
 	file_handler = open(fname, 'wb')
 	pickle.dump(var, file_handler)
 
-
 def load_obj(fname):
 	filehandler = open(fname, 'rb')
 	return pickle.load(filehandler)
-
 
 # CV2 rigid registration function
 def rigid_reg(fixed, moving,netR):
@@ -1276,7 +858,6 @@ def rigid_reg(fixed, moving,netR):
 	# self.edges[edgeID].view(img2 = node1_transformed)
 	return (cc, warp_cv2, xytheta_TF, node1_transformed)
 
-
 # SITK non rigid reg
 def deformable_reg(fixed, moving):
 	fixed1 = sitk.GetImageFromArray(fixed, sitk.sitkFloat32)
@@ -1299,14 +880,12 @@ def deformable_reg(fixed, moving):
 	cc = ecc(fixed, moved)
 	return moved, cc, E
 
-
 def deformable_reg_batch(batch):
 	cc = [None] * batch.shape[0]
 	E = [None] * batch.shape[0]
 	for i in range(batch.shape[0]):
 		batch[i, :, :, 1], cc[i], E[i] = deformable_reg(batch[i, :, :, 0], batch[i, :, :, 1])
 	return batch, cc, E
-
 
 def get_jacobian_energy(outTx):
 	Sxy = sitk.GetArrayFromImage(outTx.GetDisplacementField())
@@ -1317,7 +896,6 @@ def get_jacobian_energy(outTx):
 	det_j = gx_x * gy_y - gy_x * gx_y
 	return sum(np.square(det_j).flatten()) / (Sxy.shape[0] * Sxy.shape[1])
 
-
 # misc affine matrix calculations
 def affine_2d_to_3d(affine):
 	new = np.eye(4)
@@ -1325,12 +903,10 @@ def affine_2d_to_3d(affine):
 	new[0:2, 3] = affine[0:2, 2]
 	return new
 
-
 def affine_make_full(affine):
 	new = np.eye(max(affine.shape))
 	new[0:affine.shape[0], 0:affine.shape[1]] = affine
 	return new
-
 
 def affine2d_from_xytheta(xytheta):
 	x, y, theta = xytheta
@@ -1339,7 +915,6 @@ def affine2d_from_xytheta(xytheta):
 					   [0, 0, 1]])
 	return affine
 
-
 # Checks if a matrix is a valid rotation matrix.
 def isRotationMatrix(R):
 	Rt = np.transpose(R)
@@ -1347,7 +922,6 @@ def isRotationMatrix(R):
 	I = np.identity(3, dtype=R.dtype)
 	n = np.linalg.norm(I - shouldBeIdentity)
 	return n < 1e-6
-
 
 def affine_get_params(R):
 	assert (isRotationMatrix(R[0:3, 0:3]))
@@ -1370,7 +944,6 @@ def affine_get_params(R):
 	z = R[2, -1]
 
 	return [theta_x, theta_y, theta_z, x, y, z]
-
 
 def reverse_tform_order(dx, dy, theta):
 	# calculate rotate -> translate from translate -> rotate
@@ -1400,7 +973,6 @@ def fit_laplace(x, y):
 			sl = scale - 0.5
 			break
 	return ul, sl, np.max(y)/stats.laplace.pdf(ul,loc=ul,scale=sl)
-
 
 def fit_pr_hypsecant(x, y, pow):
 	ul = x[np.argmax(y)]

@@ -1,29 +1,55 @@
-import cv2
 import copy
-import fsys
-from imtools import Img3D, MRI, get_defaultMETA, load_obj, save_obj, affine_2d_to_3d, affine_make_full, \
-	affine_get_params, affine2d_from_xytheta, reverse_tform_order, deformable_reg_batch
-import re
 import matplotlib.pyplot as plt
 import numpy as np
-from TF_models import RigidNet, TpsNet
+import re
 import nibabel as nib
 from scipy.misc import imsave
 import time
-#t0 = time.time()
+
+import fsys
+from imtools import Stack, Template, get_defaultMETA, load_obj, save_obj
+from search import objectiveFunction, nelderMeadSimplex, bfgs, bhopping, powell, iterativePowellWithRetrain
+from TF_models import RigidNet, TpsNet
+
 fsys.cd('D:/__Atlas__/data/30890_/histology/segmented')
 
-# generate edge network
+rigid_params = {'load_file': 'D:/__Atlas__/model_saves/model-Rigid_265x257',
+			  'save_file': 'Rigid',
+			  'save_interval': 1000,
+			  'batch_size': 32,
+			  'lr': .0001,  # Learning rate
+			  'rms_decay': 0.9,  # RMS Prop decay
+			  'rms_eps': 1e-8,  # RMS Prop epsilon
+			  'width': 265,
+			  'height': 257,
+			  'numParam': 3,
+			  'train': True}
+elastic_params = copy.deepcopy(rigid_params)
+elastic_params['load_file'] = 'D:/__Atlas__/model_saves/model-TPS_265x257'
+elastic_params['save_file'] = 'TPS'
+
+# GENERATE STACK WITH EDGE DISTRIBUTIONS
 if True:
-	# Build neighbor distributions
-	IMG = Img3D(fsys.file('*.png'))
+	print('Creating image stack...')
+	t0 = time.time()
+	# histology section files
+	fList = fsys.file('*.png')
+
+	# Generate metadata list with each section's metadata.
+	# Each section has a file name and 3D affine matrix:
+	# for resolution and z_location.  STN code does not
+	# consider each image's affine matrix.  Rigid STN
+	# rotates about image center.  affine matrixes are
+	# used to resample the Template to matching resolution
+	# at the precise z_location to match each section.
 	metaList = []
 	pixel_size = 0.244
-	section_size = .12
-	locs = [int(re.search('[0-9]*[N]', IMG.fList[i]).group(0)[0:-1]) for i in range(len(IMG.fList)) if
-			re.search('[0-9]*[N]', IMG.fList[i])]
+	section_size = .12 # z spacing
+	#file names contain section locations (this parses)
+	locs = [int(re.search('[0-9]*[N]', fList[i]).group(0)[0:-1]) for i in range(len(fList)) if
+			re.search('[0-9]*[N]', fList[i])]
 	z_middle = (max(locs) + min(locs)) / 2.
-	for i, f in enumerate(IMG.fList):
+	for i, f in enumerate(fList):
 		meta = get_defaultMETA()
 		meta['fname'] = f
 		# set x
@@ -37,12 +63,12 @@ if True:
 		meta['MAT0'][2][2] = section_size
 
 		# set x offset
-		meta['MAT'][0][3] = -pixel_size * IMG.images[i].shape[0] / 2
-		meta['MAT0'][0][3] = -pixel_size * IMG.images[i].shape[0] / 2
+		meta['MAT'][0][3] = -pixel_size * 265 / 2
+		meta['MAT0'][0][3] = -pixel_size * 257 / 2
 
 		# set y offset
-		meta['MAT'][1][3] = -pixel_size * IMG.images[i].shape[1] / 2
-		meta['MAT0'][1][3] = -pixel_size * IMG.images[i].shape[1] / 2
+		meta['MAT'][1][3] = -pixel_size * 265 / 2
+		meta['MAT0'][1][3] = -pixel_size * 257 / 2
 
 		# set z offset
 		z_pos = int(re.search('[0-9]*[N]', f).group(0)[0:-1])
@@ -52,22 +78,41 @@ if True:
 
 		metaList.append(meta)
 
-	IMG.update_meta(metaList)
-	IMG.build_edge_net(1)
-	IMG.estimate_edge_distributions()
-	save_obj(IMG, '30890_hist.obj')
+	stack = Stack(fList, metaList)
+	print('Estimating edge distributions...')
+	stack.estimate_edge_distributions(rigid_params)
+	save_obj(stack, '30890_hist.obj')
 	print('Done!')
-#t1 = time.time()
-#print(t1-t0)
-#exit()
-# load MRI
+	t1 = time.time()
+	print('Elapsed time: {} seconds'.format(t1-t0))
+
+# load template
+print('Loading template and stack...')
 fsys.cd('D:/__Atlas__/data/30890_/mri')
-mri = MRI('_30890_.nii')
-# mri.affine = .885*mri.affine
+template = Template('_30890_.nii')
+# fsys.cd('D:/__Atlas__/data/NMT_Template')
+# template = Template('NMT_Template_Repositioned.nii')
+
 fsys.cd('D:/__Atlas__/data/30890_/histology/segmented')
-IMG = load_obj('30890_hist.obj')
-# calculate histology to MRI
+stack = load_obj('30890_hist.obj')
+
+# POWELL SEARCH RECONSTRUCTION PARAMS
+if True:
+	t0 = time.time()
+	#test new search
+	netR = RigidNet(rigid_params)
+	netE = TpsNet(elastic_params)
+
+	print('starting search...')
+	vals, netR, netE = iterativePowellWithRetrain(stack,template,netR,netE,[5,-5,-5,0.95],niter = 10)
+	print('finished search...')
+
+	t1 = time.time()
+	print('Elapsed time: {} seconds'.format(t1 - t0))
+
+# GRID SEARCH RECONSTRUCTION PARAMS
 if False:
+	t0 = time.time()
 	fsys.cd('D:/__Atlas__')
 	# call some function that:
 	# takes ranges for parameters
@@ -86,7 +131,7 @@ if False:
 	# do search
 
 	# score,param,param_dist = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res, z_res)
-	score, param, param_dist = mri.param_search(IMG, zlim, theta_xlim, theta_ylim, xy_res)
+	score, param, param_dist = template.param_search(stack, zlim, theta_xlim, theta_ylim, xy_res)
 	save_obj(param_dist, 'parameter_distribution.obj')
 	# for z in range(-15,-4):
 	#   (warpList, warpParam, cost_cc) = mri.reg_to_slice_TF(IMG,dz=1,theta_x=z,theta_y=0)
@@ -100,9 +145,10 @@ if False:
 	#   print(.6*np.mean(cost_cc) + .4*p_consistency)
 
 	print(score, param)
-#t1 = time.time()
-#print(t1-t0)
+	t1 = time.time()
+	print(t1-t0)
 
+# VIEW RESULTS
 if False:
 	z = 1.65  # -1.5#-0.5 #0
 	theta_x = -6  # 3.75#7.5#8.0# 6.0
@@ -110,7 +156,7 @@ if False:
 	dxy = 0.9125  # 0.9#0.89375#0.903125#0.92187
 	dz = 0.9125# 0.925#1.053125#1.11875#0.96875
 	#resample MRI
-	new_mri = mri.get_resampled_mri(IMG, z, theta_x, theta_y, dxy, dz)
+	new_mri = template.get_resampled_mri(stack, z, theta_x, theta_y, dxy, dz)
 	fsys.cd('D:/__Atlas__/data/30890_/mri')
 	nib.save(new_mri, 'mri_resampled.nii.gz')
 
@@ -127,9 +173,9 @@ if False:
 			  'numParam': 3,
 			  'train': True}
 	net = AtlasNet(params)
-	batch = mri.gen_batch(IMG, z, theta_x, theta_y, dxy, dz)
+	batch = template.gen_batch(stack, z, theta_x, theta_y, dxy, dz)
 
-	net = mri.retrain_TF(net, batch, ntrain=2000, nbatch=32)
+	net = template.retrain_TF(net, batch, ntrain=2000, nbatch=32)
 	net.save_ckpt('D:/__Atlas__/model_saves/model-' + 'Rigid30890')
 
 	tformed, xytheta, cost_cc = net.run_batch(batch)
@@ -163,7 +209,7 @@ if False:
 	# net2 = mri.retrain_TF_E(net2, batch_pos1, ntrain=2000, nbatch=32)
 	# warped, theta_pos1, cost_cc, cost, cost2 = net2.run_batch(batch_pos1)
 
-	net2 = mri.retrain_TF_E(net2, batch, ntrain=2000, nbatch=32)
+	net2 = template.retrain_TF_E(net2, batch, ntrain=2000, nbatch=32)
 	net2.save_ckpt('D:/__Atlas__/model_saves/model-' + 'Elastic30890')
 	warped, theta_mri, cost_cc, cost, cost2 = net2.run_batch(batch)
 
@@ -172,8 +218,8 @@ if False:
 	# splines[1:-2] = 0.3333334 * splines[1:-2] + 0.3333333 * theta_neg1 + 0.3333333 * theta_pos1
 	# warped, splines2, cost_cc = net2.transform_batch(batch,splines)
 
-	IMG.set_warped_from_tformed(warped)
-	hist_mri = IMG.get_mri_from_warped()
+	stack.set_warped_from_tformed(warped)
+	hist_mri = stack.get_mri_from_warped()
 	fsys.cd('D:/__Atlas__/data/30890_/mri')
 	nib.save(new_mri, 'mri_resampled.nii.gz')
 	nib.save(hist_mri, 'hist_warped_resampled_lowReg.nii.gz')

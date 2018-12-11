@@ -1,4 +1,4 @@
-!.gitignore
+.gitignore
 !*/code
 
 
@@ -11,7 +11,10 @@ data/30890_/masks/
 data/30890_/mri/_30890_.nii
 !data/30890_/histology/*
 
-model_saves/
+!model_saves/
+model_saves/*
+!model_saves/Model-TPS*
+!model_saves/Model-Rigid*
 
 mri_skull_stripping/
 
@@ -40,3 +43,5 @@ parameter_distribution_high_reg.obj
 *.pdf
 *.txt
 
+
+code/Mutual_Information_Test\.py
