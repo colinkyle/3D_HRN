@@ -27,7 +27,7 @@ git lfs clone https://github.com/colinkyle/3D-HRN
 
 
 
-Open the script tests.py and modify the paths to reflect your local environment.  The first if block of tests.py constructs the histology image stack object and precomputes the distributions for the regularization terms (see below).  The second if block searches for the histological reconstruction.
+Open the script tests.py and modify the paths to reflect your local environment.  The first if block of tests.py constructs the histology image stack object and precomputes the distributions for the smoothing regularization term (see below).  The second if block searches for the histological reconstruction.
 
 
 
