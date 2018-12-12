@@ -62,7 +62,7 @@ In order to efficiently compute the regularization term for the smoothness betwe
 
 This step has two stages:
 
-1. Compute empirical between-section image similarity at full grid of x, y, theta positions for matrix: S_{empirical}(x,y,theta).
+1. Compute empirical between-section image similarity at full grid of x, y, theta positions for matrix: S_empirical(x,y,theta).
 
 2. Assume independence between rigid parameters and estimate distributions S(x), S(y), and S(theta) so that S(x)\*S(y)\*S(theta) approximates S(x,y,theta). 
 
