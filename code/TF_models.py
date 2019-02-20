@@ -654,9 +654,9 @@ class TpsNet:
 					 self.weight_E_det_j: [3.0],
 					 self.weight_E_div: [3.0],
 					 self.weight_E_curl: [3.0]}
-		moved, splines, cc, cost, cost2 = self.sess.run(
+		moved, splines, cost_cc, full_cost, def_energy_cost = self.sess.run(
 			[self.moved, self.Theta, self.cost_cc, self.cost, self.cost2], feed_dict=feed_dict)
-		return moved, splines, cc, cost, cost2
+		return moved, splines, cost_cc, full_cost, def_energy_cost
 
 	def save_ckpt(self, filename):
 		"""
