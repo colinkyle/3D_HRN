@@ -74,4 +74,4 @@ At runtime, we compute the registrations of histology to the template (in search
 
 ###### Training Registration Networks:
 
-You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  Some of the code is hardcoded to deal with 265x257 pixel histology sections.  Please send me a pull request if you go through the trouble of altering the code for different network sizes, or log an issue if you need help.
+You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  Some of the code in this library is hardcoded to deal with 265x257 pixel histology sections.  Please send me a pull request if you go through the trouble of altering the code for different network sizes, or log an issue if you need help.
