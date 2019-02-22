@@ -29,7 +29,7 @@ elastic_params['load_file'] = root_dir+'model_saves/model-TPS_265x257'
 elastic_params['save_file'] = 'TPS'
 
 # GENERATE STACK WITH EDGE DISTRIBUTIONS
-if False:
+if True:
 	print('Creating image stack...')
 	# histology section files
 	fList = fsys.file('*.png')
@@ -92,7 +92,7 @@ fsys.cd(root_dir+'data/30890_/histology/segmented')
 stack = load_obj('30890_hist.obj')
 
 # POWELL SEARCH for RECONSTRUCTION PARAMS Psi_T
-if False:
+if True:
 	#Do full search
 	netR = RigidNet(rigid_params)
 	netE = TpsNet(elastic_params)
