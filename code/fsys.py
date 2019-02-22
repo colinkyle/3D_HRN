@@ -184,13 +184,4 @@ def levenshteinDistance(s1, s2):
 		distances = distances_
 	return distances[-1]
 
-# os.chdir('/Users/colin/Dropbox/__Atlas__/data/30890')
-# hist = file('histology/*')
-# masks = file('masks/*')
-# matched,unmatched1,unmatched2 = matchpair(hist,masks)
-# print(matched)
-# print(' ')
-# print(unmatched1)
-# print(' ')
-# print(unmatched2)
-# print(' ')
+

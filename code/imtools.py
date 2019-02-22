@@ -2,7 +2,6 @@ import copy
 import cv2
 import json
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import math
 import nibabel as nib
 import numpy as np
@@ -469,7 +468,7 @@ class Template:
 		self.data = nib.load(fname).get_data()
 		self.data = self.data / max(self.data.flatten())
 
-	def retrain_TF(self, net, big_batch, ntrain=100, nbatch=10):
+	def retrain_TF_R(self, net, big_batch, ntrain=100, nbatch=10):
 		print('\nretraining model...')
 		## estimate transformations
 		for _ in tqdm.tqdm(range(ntrain)):
@@ -502,131 +501,6 @@ class Template:
 
 			#print('count_E: {}, cost_mi: {}'.format(cnt, cost))
 		return netR, netE
-
-	def param_search(self, IMG, zlim, theta_xlim, theta_ylim, xy_res):
-		# variables
-		nspacing = 8
-		nbatch = nspacing ** 4
-		n_each_param = 1
-		ntrain = [0]#, 0, 0, 0]#[5000, 500, 200, 200]
-		## load net
-		print('loading models...')
-		# go to training dir
-		fsys.cd('D:/__Atlas__')
-		params = {'load_file': 'D:/__Atlas__/model_saves/model-Rigid30890',
-				  'save_file': 'regNETshallow',
-				  'save_interval': 1000,
-				  'batch_size': 32,
-				  'lr': .0001,  # Learning rate
-				  'rms_decay': 0.9,  # RMS Prop decay
-				  'rms_eps': 1e-8,  # RMS Prop epsilon
-				  'width': 265,
-				  'height': 257,
-				  'numParam': 3,
-				  'train': True}
-		netR = RigidNet(params)
-		params['load_file'] = 'D:/__Atlas__/model_saves/model-Elastic30890'
-		params['save_file'] = 'Elastic2'
-		netE = TpsNet(params)
-
-		param_dist = []
-		max_score = 0
-		max_param = [0, 0, 0]
-		# loop parameter resolution
-		for res in range(len(ntrain)):
-			## gen training batch
-			print('\ngenerating training batch...')
-
-			z_vals = []  # np.random.randint(zlim[0],zlim[1],nbatch)
-			theta_x_vals = []
-			theta_y_vals = []
-			dxy_vals = []
-
-			zs = np.linspace(zlim[0], zlim[1], nspacing)
-			txs = np.linspace(theta_xlim[0], theta_xlim[1], nspacing)
-			tys = np.linspace(theta_ylim[0], theta_ylim[1], nspacing)
-			dxys = np.linspace(xy_res[0], xy_res[1], nspacing)
-
-			for z in zs:
-				for tx in txs:
-					for ty in tys:
-						for dxy in dxys:
-							z_vals.append(z)
-							theta_x_vals.append(tx)
-							theta_y_vals.append(ty)
-							dxy_vals.append(dxy)
-			if ntrain[res] > 0:
-				big_batch = np.zeros(shape=(n_each_param * nbatch, params['width'], params['height'], 2), dtype=np.float32)
-
-				pos = (0, n_each_param)
-				for z, tx, ty, dxy in tqdm.tqdm(zip(z_vals, theta_x_vals, theta_y_vals, dxy_vals)):
-					big_batch[pos[0]:pos[1], :, :, :] = self.gen_batch(IMG, z, tx, ty, dxy, dxy, subsample=True,
-																	   n_subsample=n_each_param)  # [np.random.choice(range(len(IMG.images)),n_each_param),:,:,:]
-					pos = (pos[0] + n_each_param, pos[1] + n_each_param)
-
-			#view batch?
-			# plt.imshow(np.concatenate([big_batch[0], np.zeros([265, 257, 1])], axis=2))
-			# plt.show()
-			# retrain networks
-
-				netR, netE = self.retrain_TF_Both(netR, netE, big_batch, ntrain=ntrain[res], nbatch=32)
-
-			## compute fits
-			print('\ncomputing parameter scores...')
-			score = np.zeros(shape=(nbatch,))
-			each_score = np.zeros(shape=(nbatch, 3))
-			pos = 0
-			for z, tx, ty, dxy in tqdm.tqdm(zip(z_vals, theta_x_vals, theta_y_vals, dxy_vals)):
-				batch = self.gen_batch(IMG, z, tx, ty, dxy, dxy)
-				# run rigid
-				tformed, xytheta, _ = netR.run(batch)
-				for i in range(tformed.shape[0]):
-					batch[i, :, :, 1] = np.squeeze(tformed[i, :, :])
-
-				# run elastic
-				tformed, theta, cost_cc, cost, cost2 = netE.run(batch)
-				# compute global cost function
-				p_consistency = IMG.score_param_consistency(xytheta)
-				score[pos] = .4 * np.mean(cost_cc) + .6 * p_consistency - cost2
-				if np.isnan(score[pos]):
-					score[pos] = 0
-
-				each_score[pos, 0] = cost_cc
-				each_score[pos, 1] = p_consistency
-				each_score[pos, 2] = cost2
-				pos += 1
-
-			## update parameter ranges
-			param_dist.append(zip(z_vals, theta_x_vals, theta_y_vals, dxy_vals, score, each_score.T.tolist()[0],
-								  each_score.T.tolist()[1], each_score.T.tolist()[2]))
-			plt.figure()
-			n, bins, _ = plt.hist(score)
-			plt.show()
-			max_id = np.argmax(score)
-			print('\nmax score:', np.max(score), 'pos:', z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id],
-				  dxy_vals[max_id])
-
-			if np.max(score) > max_score:
-				max_score = np.max(score)
-				max_param = [z_vals[max_id], theta_x_vals[max_id], theta_y_vals[max_id], dxy_vals[max_id]]
-				# update z
-				z_span = np.asscalar(np.diff(zlim)) / 4.
-				zlim = [z_vals[max_id] - z_span, z_vals[max_id] + z_span]
-				# update theta x
-				tx_span = np.asscalar(np.diff(theta_xlim)) / 4.
-				theta_xlim = [theta_x_vals[max_id] - tx_span, theta_x_vals[max_id] + tx_span]
-				# update theta y
-				ty_span = np.asscalar(np.diff(theta_ylim)) / 4.
-				theta_ylim = [theta_y_vals[max_id] - ty_span, theta_y_vals[max_id] + ty_span]
-
-				# update dxy
-				dxy_span = np.asscalar(np.diff(xy_res)) / 4.
-				xy_res = [dxy_vals[max_id] - dxy_span, dxy_vals[max_id] + dxy_span]
-
-		## close net
-		tf.reset_default_graph()
-		del netR, netE
-		return max_score, max_param, param_dist
 
 	def gen_batch(self, IMG, z_loc, theta_x, theta_y, dxy, dz, subsample=False, n_subsample=0):
 		"""
@@ -858,54 +732,11 @@ def rigid_reg(fixed, moving,netR):
 	# self.edges[edgeID].view(img2 = node1_transformed)
 	return (cc, warp_cv2, xytheta_TF, node1_transformed)
 
-# SITK non rigid reg
-def deformable_reg(fixed, moving):
-	fixed1 = sitk.GetImageFromArray(fixed, sitk.sitkFloat32)
-	moving1 = sitk.GetImageFromArray(moving, sitk.sitkFloat32)
-	demons = sitk.FastSymmetricForcesDemonsRegistrationFilter()
-	demons.SetNumberOfIterations(2000)
-	demons.SetStandardDeviations(5.0)
-
-	warpField = demons.Execute(fixed1, moving1)
-	outTx = sitk.DisplacementFieldTransform(warpField)
-
-	resampler = sitk.ResampleImageFilter()
-	resampler.SetReferenceImage(fixed1)
-	resampler.SetInterpolator(sitk.sitkLinear)
-	resampler.SetDefaultPixelValue(0.)
-	resampler.SetTransform(outTx)
-	moved = sitk.GetArrayFromImage(resampler.Execute(moving1))
-
-	E = get_jacobian_energy(outTx)
-	cc = ecc(fixed, moved)
-	return moved, cc, E
-
-def deformable_reg_batch(batch):
-	cc = [None] * batch.shape[0]
-	E = [None] * batch.shape[0]
-	for i in range(batch.shape[0]):
-		batch[i, :, :, 1], cc[i], E[i] = deformable_reg(batch[i, :, :, 0], batch[i, :, :, 1])
-	return batch, cc, E
-
-def get_jacobian_energy(outTx):
-	Sxy = sitk.GetArrayFromImage(outTx.GetDisplacementField())
-	gx_y, gx_x = np.gradient(Sxy[:, :, 0])
-	gy_y, gy_x = np.gradient(Sxy[:, :, 1])
-	gx_x += 1
-	gy_y += 1
-	det_j = gx_x * gy_y - gy_x * gx_y
-	return sum(np.square(det_j).flatten()) / (Sxy.shape[0] * Sxy.shape[1])
-
 # misc affine matrix calculations
 def affine_2d_to_3d(affine):
 	new = np.eye(4)
 	new[0:2, 0:2] = affine[0:2, 0:2]
 	new[0:2, 3] = affine[0:2, 2]
-	return new
-
-def affine_make_full(affine):
-	new = np.eye(max(affine.shape))
-	new[0:affine.shape[0], 0:affine.shape[1]] = affine
 	return new
 
 def affine2d_from_xytheta(xytheta):
@@ -944,19 +775,6 @@ def affine_get_params(R):
 	z = R[2, -1]
 
 	return [theta_x, theta_y, theta_z, x, y, z]
-
-def reverse_tform_order(dx, dy, theta):
-	# calculate rotate -> translate from translate -> rotate
-	dx1 = np.cos(np.deg2rad(theta)) * dx - np.sin(np.deg2rad(theta)) * dy
-	dy1 = np.sin(np.deg2rad(theta)) * dx + np.cos(np.deg2rad(theta)) * dy
-
-	# calculate translate -> rotate from rotate -> translate
-	dx2 = (dx + (np.sin(np.deg2rad(theta)) / np.cos(np.deg2rad(theta))) * dy) / (
-				np.cos(np.deg2rad(theta)) + ((np.sin(np.deg2rad(theta)) ** 2) / np.cos(np.deg2rad(theta))))
-	dy2 = (dy - (np.sin(np.deg2rad(theta)) / np.cos(np.deg2rad(theta))) * dx) / (
-				np.cos(np.deg2rad(theta)) + ((np.sin(np.deg2rad(theta)) ** 2) / np.cos(np.deg2rad(theta))))
-
-	return [[dx1, dy1], [dx2, dy2]]
 
 def fit_laplace(x, y):
 	ul = x[np.argmax(y)]
