@@ -50,7 +50,7 @@ This library was developed using Python 3 and Tensorflow 1.0, and requires vario
 
 2. Retrain the registration networks to optimize registration of the histology to the template.
 
-3. Search for the transformation of the Template image (rigid + scaling) which maximizes the objetive function. The objective function measures template and stack similarity once the stack has been registered to the template.  It has two regularization terms measuring a. smoothness between neighboring sections in the stack (precomputed in first if block of example_reconstruction.py) and b. deformation energy of non-rigid registration from histology to the template (an output of the Tps non-rigid registration neural network).
+3. Search for the transformation of the Template image (rigid + scaling) which maximizes the objective function. The objective function measures template and stack similarity once the stack has been registered to the template.  It has two regularization terms measuring a. smoothness between neighboring sections in the stack (precomputed in first if block of example_reconstruction.py) and b. deformation energy of non-rigid registration from histology to the template (an output of the Tps non-rigid registration neural network).
 
 4. Go to step 1, sample at best transformation from step 3.
 
@@ -74,4 +74,4 @@ At runtime, we compute the registrations of histology to the template (in search
 
 ###### Training Registration Networks:
 
-You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  Some of the code is hardcoded to deal with 265x257 pixel histology sections.  Please send me a pull request if go through the trouble of altering the code for different network sizes, or log an issue if you'd like to but need help.
+You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  Some of the code is hardcoded to deal with 265x257 pixel histology sections.  Please send me a pull request if you go through the trouble of altering the code for different network sizes, or log an issue if you need help.
