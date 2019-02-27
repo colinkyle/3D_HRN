@@ -304,7 +304,7 @@ class Stack:
 						Xform[cnt] = [i+xytheta_TF[0,0], j+xytheta_TF[0,1], k+xytheta_TF[0,2]]
 						cnt += 1
 			#batch of fixed movings with which to apply different xforms
-			batch = np.zeros((batch_size, 265, 257, 2))
+			batch = np.zeros((batch_size, fixed.shape[0], fixed.shape[1], 2))
 			for i in range(batch_size):
 				batch[i] = np.stack((fixed, moving), axis=2)
 
@@ -446,7 +446,7 @@ class Stack:
 			arg_loc = np.argwhere(z_all == z_pos)
 			z_arg[arg_loc] = i
 
-		hist_data = np.zeros((265, 257, len(z_arg)))
+		hist_data = np.zeros((self.images[0].shape[0], self.images[0].shape[1], len(z_arg)))
 		for z in range(len(z_arg)):
 			if ~np.isnan(z_arg[z]):
 				hist_data[:, :, z] = self.images[np.int(z_arg[z])].warped
@@ -638,7 +638,7 @@ class Template:
 						np.sum(mri_affine[2, :] * np.array([0, 0, self.data.shape[2], 1])))
 		zs_mri = np.linspace(z_bounds_mri[0], z_bounds_mri[1], self.data.shape[2])
 
-		new_mri = np.zeros((265, 257, self.data.shape[2]))
+		new_mri = np.zeros((IMG.images[0].shape[0], IMG.images[0].shape[1], self.data.shape[2]))
 
 		for i, z2 in enumerate(zs_mri):
 			x = np.array([IMG.images[0].meta['MAT'][0][0] * x + IMG.images[0].meta['MAT'][0][3] for x in
@@ -716,7 +716,7 @@ def rigid_reg(fixed, moving,netR):
 	x, y = np.sum(warp_cv2[0:2, 0:2] * mid, axis=1) + warp_cv2[:, 2] - mid
 	theta = 180 * math.atan2(warp_matrix[0, 1], warp_matrix[0, 0]) / math.pi
 	xytheta_TF = np.array([[-x, -y, theta]])
-	batch = np.zeros((1, 265, 257, 2))
+	batch = np.zeros((1, fixed.shape[0], fixed.shape[1], 2))
 	batch[0, :, :, :] = np.stack((fixed, moving), axis=2)
 	moved, cost = netR.transform_with_xytheta(batch, xytheta_TF)
 	node1_transformed = moved[0].squeeze()

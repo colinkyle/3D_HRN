@@ -47,8 +47,8 @@ class RigidNet:
 		  'lr': .0001,  # Learning rate
 		  'rms_decay': 0.999,  # RMS Prop decay
 		  'rms_eps': 1e-9,  # RMS Prop epsilon
-		  'width': 265, # (confusing- vertical dimension of histology images)
-		  'height': 257,# (confusing- horizontal dimension of histology images)
+		  'width': 265, # (vertical dimension of histology images)
+		  'height': 257,# (horizontal dimension of histology images)
 		  'numParam': 3,# output to STN x,y,theta for resampling the moving image
 		  'train': True, # Enables/Disables dropout
 		  }
@@ -569,7 +569,7 @@ class TpsNet:
 				# squared intensity error
 				self.cost_se = tf.reduce_mean(tf.pow(tf.subtract(self.result[:, :, :, 1], self.In[:, :, :, 0]), 2))
 
-				stacked = tf.stack([tf.reshape(self.In[:, :, :, 0], [-1, 265 * 257, 1, 1]), tf.reshape(self.result[:, :, :, 1], [-1, 265 * 257, 1, 1])], axis=2)
+				stacked = tf.stack([tf.reshape(self.In[:, :, :, 0], [-1, params['width'] * params['height'], 1, 1]), tf.reshape(self.result[:, :, :, 1], [-1, params['width'] * params['height'], 1, 1])], axis=2)
 				#self.cost_mi = MutualInformation(stacked[:, 0:5:-1, :, :])/stacked.get_shape()[0]
 
 				# self.cost_e = tf.abs((tf.reduce_sum(self.Energy)/bat_size) - 1)

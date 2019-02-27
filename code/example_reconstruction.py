@@ -130,7 +130,7 @@ if True:
 	# (Save the model after training for faster viewing next time)
 	netR = RigidNet(rigid_params)
 	batch = template.gen_batch(stack, z, theta_x, theta_y, dxyz, dxyz)
-	netR = template.retrain_TF(netR, batch, ntrain=100, nbatch=32)
+	netR = template.retrain_TF_R(netR, batch, ntrain=100, nbatch=32)
 
 	#generate rigidly reconstructed stack
 	tformed, xytheta, cost_cc = netR.run(batch)

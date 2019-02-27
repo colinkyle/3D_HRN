@@ -41,7 +41,7 @@ def iterativePowellWithRetrain(stack, template, netR, netE, params, niter=5):
         # grid of action noise
         zs, txs, tys, dxys = np.meshgrid(np.linspace(z - res[0], z + res[0], 3), np.linspace(tx - res[1], tx + res[1], 3), np.linspace(ty - res[2], ty + res[2], 3), np.linspace(dxy - res[3], dxy + res[3], 3), sparse=False, indexing='ij')
         n_each = 10
-        batch = np.zeros(shape=(810, 265, 257, 2))
+        batch = np.zeros(shape=(810, stack.images[0].shape[0], stack.images[0].shape[1], 2))
         pos = np.array([0, 10])
 
         # gen batches in best search location + action noise
@@ -72,7 +72,7 @@ def iterativePowellWithRetrainRigid(stack, template, netR, params, niter=5):
                                          np.linspace(ty - res[2], ty + res[2], 3),
                                          np.linspace(dxy - res[3], dxy + res[3], 3), sparse=False, indexing='ij')
         n_each = 10
-        batch = np.zeros(shape=(810, 265, 257, 2))
+        batch = np.zeros(shape=(810, stack.images[0].shape[0], stack.images[0].shape[1], 2))
         pos = np.array([0, 10])
 
         # gen batches in best search location + action noise
