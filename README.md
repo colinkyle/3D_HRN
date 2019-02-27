@@ -74,4 +74,4 @@ At runtime, we compute the registrations of histology to the template (in search
 
 ###### Training Registration Networks:
 
-You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  Some of the code in this library is hardcoded to deal with 265x257 pixel histology sections.  Please send me a pull request if you go through the trouble of altering the code for different network sizes, or log an issue if you need help.
+You can see example training scripts in train_supervised_RigidNet.py, train_unsupervised_RigidNet.py, and train_unsupervised_TpsNet.py.  For now, networks are specific to the histology image dimensions.  I used 265 x 257 pixel histology images so that is what the pre-trained networks will work on.  New networks will have to be generated to work with different sized images.  Larger images should train without modification to TF_models.py, but smaller images may require reduction of the stride or filter size in the CNN portion of the STN.  Please let me know if you'd like to train STNs for a different image size and I'll try to help.
